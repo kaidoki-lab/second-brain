@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>HOME CONTROL</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div id="head">
+  <span id="title">HOME CONTROL</span>
+  <span id="clock">--:--</span>
+</div>
+
+<div id="statusbar">
+  <span class="pc"><b>{{ main_name }}</b> <i id="dot-main" class="dot">●</i>
+    <span id="txt-main">---</span></span>
+  <span class="pc"><b>{{ sub_name }}</b> <i id="dot-sub" class="dot">●</i>
+    <span id="txt-sub">---</span></span>
+  <span class="metric">CPU <b id="cpu">--</b>%</span>
+  <span class="metric">RAM <b id="ram">--</b>%</span>
+  <span class="metric">DISK <b id="disk">--</b>%</span>
+  <span class="metric">FREE <b id="free">--</b>GB</span>
+</div>
+
+<div id="message" class="idle">待機中</div>
+
+{% for section in catalog %}
+<div class="group">
+  <div class="group-title">{{ section.group }}</div>
+  <div class="buttons">
+    {% for button in section.buttons %}
+    <button class="btn" data-action="{{ button.name }}"
+            data-params='{{ button.params | tojson }}'
+            data-confirm="{{ 1 if button.confirm else 0 }}">{{ button.label }}</button>
+    {% endfor %}
+  </div>
+  <div class="clear"></div>
+</div>
+{% endfor %}
+
+<div id="panel" class="hidden">
+  <div id="panel-head">
+    <span id="panel-title">RESULT</span>
+    <button id="panel-close" class="small">閉じる</button>
+  </div>
+  <pre id="panel-body"></pre>
+</div>
+
+<div id="foot">SOT21 LAN CONTROLLER &middot; LAN内専用</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

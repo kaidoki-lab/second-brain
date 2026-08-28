@@ -1,0 +1,77 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000
+  },
+  "security": {
+    "lan_only": true,
+    "allow_networks": [
+      "127.0.0.0/8",
+      "192.168.0.0/16",
+      "10.0.0.0/8",
+      "172.16.0.0/12"
+    ]
+  },
+  "main_pc": {
+    "name": "MAIN PC",
+    "disk": "C:\\"
+  },
+  "sub_pc": {
+    "name": "SUB PC",
+    "ip": "192.168.1.21",
+    "mac": "00:00:00:00:00:00",
+    "port": 445,
+    "broadcast": "192.168.1.255"
+  },
+  "commands": {
+    "test_python": {
+      "label": "テストPython",
+      "program": "python",
+      "args": ["scripts/test_job.py"],
+      "wait": true,
+      "timeout": 30
+    },
+    "test_bat": {
+      "label": "テストBAT",
+      "program": "scripts/test_job.bat",
+      "wait": true,
+      "timeout": 30
+    },
+    "shortfactory": {
+      "label": "ShortFACTORY",
+      "program": "C:\\KYOUKAI\\ShortFACTORY\\start.bat",
+      "wait": false
+    },
+    "image_process": {
+      "label": "画像処理",
+      "program": "C:\\Tools\\image_process.bat",
+      "wait": false
+    }
+  },
+  "folders": {
+    "share": "C:\\share",
+    "output": "C:\\KYOUKAI\\output",
+    "render": "C:\\KYOUKAI\\render"
+  },
+  "obs": {
+    "exe_path": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
+    "cwd": "C:\\Program Files\\obs-studio\\bin\\64bit",
+    "websocket": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 4455,
+      "password": ""
+    }
+  },
+  "brain": {
+    "enabled": true,
+    "url": "http://127.0.0.1:8765",
+    "api_key": "",
+    "project": "synaptic_grove",
+    "roles": ["progress", "design", "builder"],
+    "launch": {
+      "program": "python",
+      "args": ["../second_brain/run.py", "serve"]
+    }
+  }
+}

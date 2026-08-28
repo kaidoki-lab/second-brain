@@ -1,0 +1,63 @@
+/* Android 5.0.2 (Chrome 37) 前提: grid/gap は使わない。inline-block と float のみ。 */
+* { -webkit-box-sizing: border-box; box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 10px 30px;
+  background: #10141a; color: #e8eef5;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-size: 17px; -webkit-text-size-adjust: 100%;
+}
+#head { padding: 12px 4px 6px; border-bottom: 2px solid #2b3542; }
+#title { font-size: 26px; font-weight: bold; letter-spacing: 3px; }
+#clock { float: right; font-size: 22px; color: #8fa3b8; }
+
+#statusbar { padding: 10px 2px; border-bottom: 1px solid #2b3542; }
+#statusbar .pc, #statusbar .metric {
+  display: inline-block; margin: 4px 18px 4px 0; font-size: 19px; white-space: nowrap;
+}
+#statusbar b { color: #ffffff; }
+.dot { font-style: normal; font-size: 22px; color: #6b7785; vertical-align: -1px; }
+.dot.on { color: #35d07f; }
+.dot.off { color: #ff5b5b; }
+
+#message {
+  margin: 12px 0; padding: 14px 16px; border-radius: 8px;
+  font-size: 21px; font-weight: bold; min-height: 56px;
+  border: 2px solid #2b3542; background: #171d26; color: #9fb0c3;
+}
+#message.busy { border-color: #d8a13a; color: #ffcf70; }
+#message.ok   { border-color: #35d07f; color: #7df0b4; }
+#message.err  { border-color: #ff5b5b; color: #ff9a9a; }
+
+.group { margin-top: 14px; }
+.group-title {
+  font-size: 14px; letter-spacing: 3px; color: #7d8fa3;
+  border-bottom: 1px solid #232c37; padding-bottom: 4px; margin-bottom: 8px;
+}
+.buttons { margin: 0; }
+.btn {
+  float: left; width: 170px; height: 96px; margin: 0 10px 10px 0; padding: 6px;
+  background: #1d5f8f; color: #ffffff; border: 1px solid #2f88c8; border-radius: 10px;
+  font-size: 18px; font-weight: bold; line-height: 1.25;
+  -webkit-tap-highlight-color: rgba(0,0,0,0); cursor: pointer;
+}
+.btn:active { background: #2f88c8; }
+.btn.pending { background: #6b5a1d; border-color: #d8a13a; }
+.btn[data-confirm="1"] { background: #7a3a1d; border-color: #c8702f; }
+.btn[data-confirm="1"]:active { background: #c8702f; }
+.clear { clear: both; }
+
+#panel { margin-top: 16px; border: 1px solid #2b3542; border-radius: 8px;
+         background: #0c1016; }
+#panel.hidden { display: none; }
+#panel-head { padding: 8px 12px; border-bottom: 1px solid #2b3542; }
+#panel-title { font-size: 15px; letter-spacing: 2px; color: #8fa3b8; }
+#panel-body {
+  margin: 0; padding: 12px; max-height: 420px; overflow: auto;
+  font-family: Consolas, monospace; font-size: 15px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-all; color: #cfe0f0;
+}
+.small {
+  float: right; height: 34px; padding: 0 14px; font-size: 14px;
+  background: #2b3542; color: #e8eef5; border: 0; border-radius: 6px;
+}
+#foot { clear: both; padding: 20px 2px; color: #55616f; font-size: 13px; }

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+logs/*.log
+logs/*.log.*
+config.local.json
