@@ -66,6 +66,7 @@
   "brain": {
     "enabled": true,
     "url": "http://127.0.0.1:8765",
+    "url_file": "~/.second_brain/server_url.txt",
     "api_key": "",
     "project": "synaptic_grove",
     "roles": ["progress", "design", "builder"],

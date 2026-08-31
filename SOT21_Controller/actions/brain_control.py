@@ -13,11 +13,31 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from . import ActionError, Result, action
 
 TIMEOUT = 6
+
+
+def live_url(ctx) -> str:
+    """第二の脳が実際に待ち受けているアドレス。
+
+    ポートが他のアプリと衝突すると自動で別の番号になるため、サーバーが
+    書き出す server_url.txt を優先して読む（無ければ config.json の値）。
+    """
+    brain = ctx.config.get("brain", {})
+    configured = str(brain.get("url", "")).rstrip("/")
+    # 別PCの第二の脳を指している場合は、このPCの記録で上書きしない。
+    if not any(host in configured for host in ("127.0.0.1", "localhost")):
+        return configured
+    hint = brain.get("url_file") or "~/.second_brain/server_url.txt"
+    try:
+        recorded = Path(hint).expanduser().read_text(encoding="utf-8").strip()
+    except OSError:
+        return configured
+    return recorded.rstrip("/") or configured
 
 
 def _settings(ctx) -> dict[str, Any]:
@@ -32,7 +52,7 @@ def _settings(ctx) -> dict[str, Any]:
 def request(ctx, path: str, method: str = "GET",
             payload: dict[str, Any] | None = None) -> tuple[int, str]:
     brain = _settings(ctx)
-    url = brain["url"].rstrip("/") + path
+    url = live_url(ctx) + path
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
@@ -51,7 +71,8 @@ def request(ctx, path: str, method: str = "GET",
             from exc
     except urllib.error.URLError as exc:
         raise ActionError("第二の脳へ接続できません "
-                          f"({brain['url']}): {exc.reason}") from exc
+                          f"({live_url(ctx)}): {exc.reason}。"
+                          "第二の脳が起動しているか確認してください") from exc
 
 
 def _project(ctx, params: dict[str, Any]) -> str:
@@ -128,10 +149,11 @@ def brain_open(ctx, params: dict[str, Any]) -> Result:
     brain = _settings(ctx)
     status, body = request(ctx, "/api/health")
     health = json.loads(body) if status == 200 else {}
+    url = live_url(ctx)
     return Result(True, "第二の脳 稼働中",
-                  f"{brain['url']}\nprojects: {health.get('projects')} / "
-                  f"agents: {health.get('agents')}",
-                  {"url": brain["url"], "health": health})
+                  f"{url}\n企画 {health.get('projects')} 件 / "
+                  f"AI {health.get('agents')} 体",
+                  {"url": url, "health": health})
 
 
 @action("brain_serve", "第二の脳を起動", "SECOND BRAIN", confirm=True)
@@ -143,7 +165,7 @@ def brain_serve(ctx, params: dict[str, Any]) -> Result:
         raise ActionError("config.json の brain.launch.program を設定してください")
     try:
         request(ctx, "/api/health")
-        return Result(True, "第二の脳は既に稼働中です", brain["url"])
+        return Result(True, "第二の脳は既に稼働中です", live_url(ctx))
     except ActionError:
         pass
     from .run_command import build_argv

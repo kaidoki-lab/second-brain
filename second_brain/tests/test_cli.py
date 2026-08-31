@@ -79,8 +79,55 @@ class ServerGuardTest(unittest.TestCase):
         config = Config(host="0.0.0.0", port=0, api_key=None)
         with self.assertRaises(SystemExit) as caught:
             serve(App(seeded_store(), config), config)
-        self.assertIn("API key", str(caught.exception))
+        self.assertIn("APIキー", str(caught.exception))
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PortFallbackTest(unittest.TestCase):
+    """別の企画のアプリが同じポートを使っていても起動できること。"""
+
+    def test_busy_port_falls_back_to_the_next_free_one(self):
+        import socket
+        from secondbrain.app import App
+        from secondbrain.config import Config
+        from secondbrain.server import build_server, find_free_port, port_is_free
+
+        blocker = socket.socket()
+        blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        busy = blocker.getsockname()[1]
+        try:
+            self.assertFalse(port_is_free("127.0.0.1", busy))
+            self.assertEqual(find_free_port("127.0.0.1", busy), busy + 1)
+
+            config = Config(host="127.0.0.1", port=busy)
+            server = build_server(App(seeded_store(), config), config)
+            try:
+                self.assertNotEqual(server.server_address[1], busy)
+            finally:
+                server.server_close()
+        finally:
+            blocker.close()
+
+    def test_free_port_is_used_as_is(self):
+        from secondbrain.server import find_free_port, port_is_free
+        import socket
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        free = probe.getsockname()[1]
+        probe.close()
+        if port_is_free("127.0.0.1", free):
+            self.assertEqual(find_free_port("127.0.0.1", free), free)
+
+    def test_url_file_records_the_live_address(self):
+        from secondbrain.config import Config
+        from secondbrain.server import url_file_path, write_url_file
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Config(db_path=Path(tmp) / "brain.db", port=8765)
+            write_url_file(config, 8766)
+            self.assertEqual(url_file_path(config).read_text(encoding="utf-8").strip(),
+                             "http://127.0.0.1:8766")

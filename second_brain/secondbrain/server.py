@@ -12,6 +12,7 @@ import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from .app import App
 from .config import Config
@@ -79,9 +80,39 @@ def local_ips() -> list[str]:
     return out
 
 
+def port_is_free(host: str, port: int) -> bool:
+    """そのポートで待ち受けできるかを実際に試す。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def find_free_port(host: str, preferred: int, attempts: int = 40) -> int:
+    """希望のポートが他のアプリに使われていたら、その次の空きを探す。
+
+    別の企画のサーバーが同じポートを使っていても起動できるようにするため。
+    """
+    for offset in range(attempts):
+        candidate = preferred + offset
+        if candidate > 65535:
+            break
+        if port_is_free(host, candidate):
+            return candidate
+    raise SystemExit(
+        f"{preferred} から {preferred + attempts - 1} まで、空いているポートが"
+        "見つかりませんでした。--port で別の番号を指定してください。")
+
+
 def build_server(app: App, config: Config) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (_Handler,), {"app": app})
-    server = ThreadingHTTPServer((config.host, config.port), handler)
+    port = config.port
+    if port:                      # 0 は「OSに任せる」なのでそのまま使う
+        port = find_free_port(config.host, port)
+    server = ThreadingHTTPServer((config.host, port), handler)
     server.daemon_threads = True
     return server
 
@@ -89,16 +120,26 @@ def build_server(app: App, config: Config) -> ThreadingHTTPServer:
 def serve(app: App, config: Config, open_browser: bool = False) -> None:
     if not config.is_loopback and not config.api_key:
         raise SystemExit(
-            "refusing to bind %s without an API key.\n"
-            "Set SECOND_BRAIN_API_KEY, pass --api-key, or bind 127.0.0.1."
-            % config.host)
+            f"APIキーなしで {config.host} を公開することはできません。\n"
+            "SECOND_BRAIN_API_KEY を設定するか、--api-key を渡すか、"
+            "127.0.0.1 で起動してください。")
     server = build_server(app, config)
     port = server.server_address[1]
-    print(f"SECOND BRAIN  db={config.db_path}")
-    print(f"  local   http://127.0.0.1:{port}")
+    print("=" * 52)
+    print("  第二の脳が起動しました")
+    print("=" * 52)
+    if config.port and port != config.port:
+        print(f"  ※ {config.port} 番は他のアプリが使用中だったため、"
+              f"{port} 番で起動しました")
+    print(f"  このPCで開く : http://127.0.0.1:{port}")
     for ip in local_ips():
-        print(f"  lan     http://{ip}:{port}")
-    print("  auth    " + ("API key required" if config.api_key else "off (loopback)"))
+        print(f"  LAN内で開く  : http://{ip}:{port}")
+    print("  認証         : " + ("APIキーが必要" if config.api_key
+                                  else "なし（このPCからのみ）"))
+    print(f"  データ       : {config.db_path}")
+    print("  終了するには この画面で Ctrl + C")
+    print("=" * 52)
+    write_url_file(config, port)
     if open_browser:
         # サーバーが listen し始めてから開く（起動直後だと接続拒否になる）。
         threading.Timer(1.0, webbrowser.open,
@@ -106,10 +147,25 @@ def serve(app: App, config: Config, open_browser: bool = False) -> None:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopping")
+        print("\n終了しました")
     finally:
         server.shutdown()
         server.server_close()
+
+
+def url_file_path(config: Config) -> Path:
+    """いま動いているアドレスを書き出す場所（DBと同じフォルダ）。"""
+    return Path(config.db_path).expanduser().parent / "server_url.txt"
+
+
+def write_url_file(config: Config, port: int) -> None:
+    """ポートが変わっても他のツールが接続先を見つけられるように記録する。"""
+    try:
+        path = url_file_path(config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"http://127.0.0.1:{port}\n", encoding="utf-8")
+    except OSError:
+        pass          # 書けなくても本体の動作には影響しない
 
 
 def serve_in_thread(app: App, config: Config) -> tuple[ThreadingHTTPServer, threading.Thread]:

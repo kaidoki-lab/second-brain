@@ -136,3 +136,32 @@ class BrainIntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveUrlTest(unittest.TestCase):
+    """第二の脳のポートが変わっても、操作盤が自動で追従すること。"""
+
+    def test_url_file_wins_over_the_configured_url(self):
+        import tempfile
+        from pathlib import Path
+        from actions.brain_control import live_url
+        from _ctx import BASE, controller, make_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hint = Path(tmp) / "server_url.txt"
+            hint.write_text("http://127.0.0.1:8766\n", encoding="utf-8")
+            config = make_config(brain={"enabled": True,
+                                        "url": "http://127.0.0.1:8765",
+                                        "url_file": str(hint)})
+            ctx = controller.Context(config, BASE, controller.build_logger())
+            self.assertEqual(live_url(ctx), "http://127.0.0.1:8766")
+
+    def test_configured_url_is_used_when_no_file_exists(self):
+        from actions.brain_control import live_url
+        from _ctx import BASE, controller, make_config
+
+        config = make_config(brain={"enabled": True,
+                                    "url": "http://127.0.0.1:8765",
+                                    "url_file": "/no/such/file.txt"})
+        ctx = controller.Context(config, BASE, controller.build_logger())
+        self.assertEqual(live_url(ctx), "http://127.0.0.1:8765")
