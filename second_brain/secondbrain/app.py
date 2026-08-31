@@ -16,6 +16,8 @@ from .auth import check as auth_check, cookie_for
 from .config import Config
 from .context import ContextRouter
 from .http_util import HttpError, Request, Response
+from .bundle import build_bundle
+from .intake import apply_result, parse_result
 from .scan import DEFAULT_KEYWORDS, import_handoffs
 from .store import Invalid, NotFound, Store, slugify_id
 
@@ -359,6 +361,38 @@ def ui_home(app: App, request: Request, _: dict[str, str]) -> Response:
 def ui_project(app: App, request: Request, params: dict[str, str]) -> Response:
     return Response.html(ui.project_page(app.store, params["id"],
                                          request.q("msg", "") or ""))
+
+
+@route("GET", "/project/{id}/bundle")
+def ui_bundle(app: App, request: Request, params: dict[str, str]) -> Response:
+    return Response.html(ui.bundle_page(app.store, params["id"]))
+
+
+@route("POST", "/project/{id}/bundle")
+def ui_make_bundle(app: App, request: Request, params: dict[str, str]) -> Response:
+    """選ばれたハンドオフの本文を読み、AIへ渡す1つの文章にまとめる。"""
+    chosen = request.payload_list("handoff")
+    result = build_bundle(app.store, params["id"], chosen or None)
+    return Response.html(ui.bundle_page(app.store, params["id"], result,
+                                        set(chosen)))
+
+
+@route("GET", "/project/{id}/intake")
+def ui_intake(app: App, request: Request, params: dict[str, str]) -> Response:
+    return Response.html(ui.intake_page(app.store, params["id"]))
+
+
+@route("POST", "/project/{id}/intake")
+def ui_do_intake(app: App, request: Request, params: dict[str, str]) -> Response:
+    """AIの回答を解析し、確認のうえ保存する。"""
+    form = request.payload()
+    text = str(form.get("text", ""))
+    parsed = parse_result(text)
+    if form.get("action") == "apply":
+        written = apply_result(app.store, params["id"], parsed, actor="ui")
+        return Response.html(ui.intake_page(app.store, params["id"], "", None,
+                                            written))
+    return Response.html(ui.intake_page(app.store, params["id"], text, parsed))
 
 
 @route("GET", "/projects")

@@ -347,11 +347,14 @@ class Store:
             (project_id, limit)))
 
     def phase_summary(self, project_id: str) -> list[dict[str, Any]]:
-        """Latest status per phase, oldest phase first — the implementation map."""
+        """工程表。状態は最新の行、並び順は最初に登録された順（＝計画順）。
+
+        あとから状態だけ更新しても工程の順番が入れ替わらないようにする。
+        """
         rows = self.conn.execute(
-            "SELECT s.* FROM states s JOIN (SELECT phase, MAX(id) AS id FROM states"
-            " WHERE project_id = ? GROUP BY phase) latest ON s.id = latest.id"
-            " ORDER BY s.id", (project_id,))
+            "SELECT s.* FROM states s JOIN (SELECT phase, MAX(id) AS latest,"
+            " MIN(id) AS first_seen FROM states WHERE project_id = ? GROUP BY phase)"
+            " g ON s.id = g.latest ORDER BY g.first_seen", (project_id,))
         return rows_to_dicts(rows)
 
     # --------------------------------------------------------------- handoffs

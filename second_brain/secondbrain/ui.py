@@ -117,6 +117,7 @@ def table(headers: list[str], rows: list[list[str]], empty: str = "まだあり�
 
 STATUS_JA = {
     "ACTIVE": "進行中", "COMPLETE": "完了", "IN_PROGRESS": "作業中",
+    "PENDING": "未着手",
     "BLOCKED": "停止中", "WAITING": "待ち", "LOCKED": "確定", "PROPOSED": "検討中",
     "SUPERSEDED": "破棄", "ARCHIVED": "保管",
 }
@@ -386,6 +387,13 @@ def project_page(store: Store, project_id: str, message: str = "") -> str:
           file_flag(h["file_exists"])] for h in data["handoffs"]]))
     body += "</div>"
 
+    body += ('<div style="margin-top:18px">'
+             f'<a class="big" href="/project/{e(project_id)}/bundle">'
+             '📦 ハンドオフをAIに渡す<span>本文をまとめて1つの文章にします</span></a>'
+             f'<a class="big" href="/project/{e(project_id)}/intake">'
+             '🧩 AIの回答を取り込む<span>工程表・決定事項として保存します</span></a>'
+             '</div>')
+
     body += '<div class="grid" style="margin-top:18px">'
     body += card("決定事項を追加", _decision_form(project_id))
     body += card("工程を更新", _state_form(project_id))
@@ -445,6 +453,127 @@ def _fact_form(pid: str) -> str:
 
 
 # ================================================================ AI設定
+
+def bundle_page(store: Store, project_id: str, result: dict[str, Any] | None = None,
+                selected: set[str] | None = None) -> str:
+    """ハンドオフ本文をまとめてAIへ渡すための画面。"""
+    project = store.require_project(project_id)
+    handoffs = store.list_handoffs(project_id)
+    selected = selected if selected is not None else {h["id"] for h in handoffs}
+
+    body = f'<h2 class="page">{e(project["name"])} — ハンドオフをAIに渡す</h2>'
+    body += ('<p class="lead">選んだハンドオフの本文を読み込んで、1つの文章にまとめます。'
+             'それをAIチャットに貼り付けると、工程表と決定事項が返ってきます。</p>')
+    body += ('<div class="note">本文は<b>この画面で読み出すだけ</b>で、第二の脳には'
+             '保存しません。保存するのは、AIが出した工程と決定事項だけです。<br>'
+             '.md .txt .csv .json .docx は読めます。.pdf は読めないので除外されます。'
+             '</div>')
+
+    checks = "".join(
+        f'<label style="margin:0 0 6px"><input type="checkbox" name="handoff" '
+        f'value="{e(h["id"])}" style="width:auto;margin-right:8px"'
+        f'{" checked" if h["id"] in selected else ""}> {e(h["title"])}'
+        f'<span class="dim"> — {e(h["phase"] or "工程不明")}</span>'
+        f'<div class="path">{e(h["file_path"])}</div></label>'
+        for h in handoffs)
+    form = (f'<form method="post" action="/project/{e(project_id)}/bundle">'
+            + (checks or '<p class="empty">このハンドオフがまだありません。'
+                         '「取り込み」画面で登録してください。</p>')
+            + '<div class="actions"><button type="submit">'
+              'この内容でまとめる</button></div></form>')
+    body += '<div class="grid">' + card(f"対象を選ぶ（{len(handoffs)} 件）", form,
+                                        wide=True) + "</div>"
+
+    if result:
+        rows = [["まとめた文字数", f"{result['chars']:,} 文字"
+                 f"（およそ {result['approx_tokens']:,} トークン）"],
+                ["含めたファイル", f"{len(result['included'])} 件"],
+                ["除外したファイル", f"{len(result['skipped'])} 件"]]
+        summary = table(["項目", "内容"], rows)
+        if result["skipped"]:
+            summary += table(["除外したファイル", "理由"],
+                             [[e(x["title"]), e(x["reason"])]
+                              for x in result["skipped"]])
+        body += ('<div class="grid" style="margin-top:18px">'
+                 + card("結果", summary, wide=True) + "</div>")
+        body += ('<div class="grid" style="margin-top:18px">' + card(
+            "AIに貼り付ける内容",
+            '<p class="dim">枠の中をクリックすると全選択されます。'
+            'コピーして、ChatGPTやClaudeの新しいチャットに貼り付けてください。</p>'
+            f'<textarea id="bundle" rows="18" onclick="this.select()" readonly>'
+            f'{e(result["text"])}</textarea>'
+            '<div class="actions">'
+            '<button type="button" onclick="var t=document.getElementById(\'bundle\');'
+            't.select();document.execCommand(\'copy\');'
+            'this.textContent=\'コピーしました\'">全部コピー</button> '
+            f'<a href="/project/{e(project_id)}/intake" style="margin-left:14px">'
+            '→ AIの回答を取り込む</a></div>', wide=True) + "</div>")
+    return page(f"{project['name']} — AIに渡す", body)
+
+
+def intake_page(store: Store, project_id: str, text: str = "",
+                parsed: dict[str, Any] | None = None, written: dict[str, int] | None
+                = None) -> str:
+    """AIが返した工程表を取り込む画面（貼り付け → 確認 → 保存）。"""
+    project = store.require_project(project_id)
+    body = f'<h2 class="page">{e(project["name"])} — AIの回答を取り込む</h2>'
+    body += ('<p class="lead">AIが出した工程表・決定事項を貼り付けてください。'
+             '内容を確認してから保存します。</p>')
+
+    if written:
+        body = flash(
+            f"保存しました: 工程 {written['phases']} 件 / 決定事項 "
+            f"{written['decisions']} 件 / 事実 {written['facts']} 件 / "
+            f"依存 {written['depends']} 件 / 未決 {written['opens']} 件") + body
+
+    body += ('<div class="note">読み取れる書式:<br>'
+             '<code>PHASE: 工程名 | 状態 | 担当 | 成果物</code><br>'
+             '<code>DECISION: 決まったこと | 補足</code><br>'
+             '<code>FACT: 前提や制約 | タグ</code><br>'
+             '<code>DEPENDS: 後の工程 -&gt; 先に必要な工程</code><br>'
+             '<code>OPEN: まだ決まっていないこと</code><br>'
+             'それ以外の行は無視されます（説明文が混じっていても大丈夫です）。</div>')
+
+    body += '<div class="grid">' + card("AIの回答を貼り付ける",
+        f'<form method="post" action="/project/{e(project_id)}/intake">'
+        f'<textarea name="text" rows="14" placeholder="ここに貼り付け">{e(text)}</textarea>'
+        '<div class="actions"><button type="submit" name="action" value="preview">'
+        '内容を確認する</button></div></form>', wide=True) + "</div>"
+
+    if parsed:
+        phase_rows = [[e(p["phase"]), status_badge(p["status"]), e(p["owner"] or "-"),
+                       "、".join(e(d) for d in p["deliverables"]) or "-"]
+                      for p in parsed["phases"]]
+        blocks = card("工程表", table(["工程", "状態", "担当", "成果物"], phase_rows),
+                      wide=True)
+        blocks += card("決定事項", table(
+            ["内容", "補足"],
+            [[e(d["title"]), e(d["body"])] for d in parsed["decisions"]]))
+        blocks += card("事実・制約", table(
+            ["内容", "タグ"],
+            [[e(f["body"]), "、".join(e(t) for t in f["tags"])]
+             for f in parsed["facts"]]))
+        blocks += card("依存関係", table(
+            ["工程", "先に必要"],
+            [[e(d["src"]), e(d["dst"])] for d in parsed["depends"]]))
+        blocks += card("まだ決まっていないこと", table(
+            ["内容"], [[e(o["title"])] for o in parsed["opens"]]))
+        if parsed["unknown"]:
+            blocks += card("読み飛ばした行", table(
+                ["内容"], [[e(u)] for u in parsed["unknown"][:20]]))
+        body += ('<div class="grid" style="margin-top:18px">' + blocks + "</div>")
+
+        total = sum(len(parsed[k]) for k in
+                    ("phases", "decisions", "facts", "depends", "opens"))
+        body += ('<div class="grid" style="margin-top:18px">' + card(
+            "保存",
+            f'<p>{total} 件を第二の脳へ保存します。よろしいですか？</p>'
+            f'<form method="post" action="/project/{e(project_id)}/intake">'
+            f'<input type="hidden" name="text" value="{e(text)}">'
+            '<div class="actions"><button type="submit" name="action" value="apply">'
+            'この内容で保存する</button></div></form>', wide=True) + "</div>")
+    return page(f"{project['name']} — 回答の取り込み", body)
+
 
 def agents_page(store: Store) -> str:
     body = '<h2 class="page">AI設定</h2>'

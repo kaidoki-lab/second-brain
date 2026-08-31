@@ -49,6 +49,16 @@ class Request:
         parsed = parse_qs(self.body.decode("utf-8", "replace"))
         return {k: v[0] for k, v in parsed.items()}
 
+    def payload_list(self, name: str) -> list[str]:
+        """同じ名前のチェックボックスをすべて拾う。"""
+        ctype = self.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in ctype:
+            return parse_qs(self.body.decode("utf-8", "replace")).get(name, [])
+        value = self.json().get(name)
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        return [str(value)] if value else []
+
     def payload(self) -> dict[str, Any]:
         """JSON for agents, form-encoded for the browser UI."""
         ctype = self.headers.get("content-type", "")
