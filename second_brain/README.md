@@ -24,7 +24,7 @@
 
 **Windows: `start.bat` をダブルクリックするだけ。** ブラウザが自動で開きます。
 
-既定のポート 8765 を他のアプリが使っていた場合は、**空いている次の番号で自動的に起動します**
+既定のポート 8900 を他のアプリが使っていた場合は、**空いている次の番号で自動的に起動します**
 （黒い画面に実際のアドレスが表示され、ブラウザもそのアドレスで開きます）。
 起動中のアドレスは `~/.second_brain/server_url.txt` にも記録されるので、SOT21操作盤など
 他のツールはポートが変わっても自動で追従します。
@@ -33,7 +33,7 @@
 
 ```bash
 python run.py init            # 初回のみ: DB作成＋既定ロール5種を投入
-python run.py serve           # http://127.0.0.1:8765
+python run.py serve           # http://127.0.0.1:8900
 python run.py seed            # 任意: サンプル（SYNAPTIC GROVE）を投入
 ```
 
@@ -42,11 +42,11 @@ LAN公開（タブレットや別PCから見る場合）は APIキー必須：
 ```bash
 python run.py key                                  # キー生成
 set SECOND_BRAIN_API_KEY=<生成されたキー>            # Windows (macOS/Linux は export)
-python run.py serve --host 0.0.0.0                 # http://<PCのIP>:8765
+python run.py serve --host 0.0.0.0                 # http://<PCのIP>:8900
 ```
 
 キーなしで `0.0.0.0` にバインドしようとすると起動を拒否する。
-ブラウザからは `http://<PCのIP>:8765/login?key=<キー>` で一度入るとCookieが入る。
+ブラウザからは `http://<PCのIP>:8900/login?key=<キー>` で一度入るとCookieが入る。
 
 DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変更可）。
 
@@ -126,10 +126,10 @@ POST /api/handoffs/verify {project}
 認証は `Authorization: Bearer <key>` または `X-API-Key: <key>`。
 
 ```bash
-curl -H "Authorization: Bearer $KEY" http://192.168.1.10:8765/context/design
+curl -H "Authorization: Bearer $KEY" http://192.168.1.10:8900/context/design
 curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
      -d '{"project":"synaptic_grove","title":"CHANNELは分岐3方向まで","status":"LOCKED"}' \
-     http://192.168.1.10:8765/api/decision
+     http://192.168.1.10:8900/api/decision
 ```
 
 ## ロールプロファイル
@@ -189,8 +189,8 @@ Claude Desktop / Claude Code の設定例:
 
 `127.0.0.1` / `192.168.x.x` はクラウドAIから直接参照できない。HTTPS入口を用意する:
 
-- Cloudflare Tunnel: `cloudflared tunnel --url http://127.0.0.1:8765`
-- Tailscale Funnel: `tailscale funnel 8765`
+- Cloudflare Tunnel: `cloudflared tunnel --url http://127.0.0.1:8900`
+- Tailscale Funnel: `tailscale funnel 8900`
 - 自前VPS + リバースプロキシ
 
 いずれの場合も `SECOND_BRAIN_API_KEY` を必ず設定する。

@@ -14,6 +14,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import RELEASE
 from .app import App
 from .config import Config
 from .http_util import Request
@@ -127,6 +128,7 @@ def serve(app: App, config: Config, open_browser: bool = False) -> None:
     port = server.server_address[1]
     print("=" * 52)
     print("  第二の脳が起動しました")
+    print(f"  バージョン: {RELEASE}")
     print("=" * 52)
     if config.port and port != config.port:
         print(f"  ※ {config.port} 番は他のアプリが使用中だったため、"

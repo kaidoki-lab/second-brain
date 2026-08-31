@@ -9,7 +9,7 @@
 
 ```
    SOT21 (ブラウザ)                    ChatGPT / Codex / Claude / Gemini
-        │ :5000                              │ :8765  (HTTP / MCP)
+        │ :5000                              │ :8900  (HTTP / MCP)
    SOT21_Controller  ────────────────►  second_brain
         │                                （唯一の正本: 事実・決定・状態・ハンドオフ）
    bat / Python / OBS / ファイル / サブPC制御
@@ -24,7 +24,7 @@
 cd second_brain
 python run.py init          # DB作成 + 役割5種を投入
 python run.py seed          # サンプル企画（不要なら省略）
-python run.py serve         # http://127.0.0.1:8765
+python run.py serve         # http://127.0.0.1:8900
 
 # 2) 操作盤（別ウィンドウ / Windows は start.bat をダブルクリック）
 cd SOT21_Controller

@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8765
+#: 8765 は他のローカル開発サーバーと衝突しやすいので避ける。
+DEFAULT_PORT = 8900
 
 #: Target size of a generated context payload (spec section 12).
 CONTEXT_TOKEN_BUDGET_MIN = 500

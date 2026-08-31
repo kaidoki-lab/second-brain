@@ -155,7 +155,7 @@ POST /api/action    {"action":"obs_start"} -> {"success":true,"message":"OBSã‚’è
 ```json
 "brain": {
   "enabled": true,
-  "url": "http://127.0.0.1:8765",
+  "url": "http://127.0.0.1:8900",
   "api_key": "",
   "project": "synaptic_grove",
   "roles": ["progress", "design", "builder"]
