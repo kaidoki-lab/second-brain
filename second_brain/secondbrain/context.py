@@ -21,13 +21,17 @@ from typing import Any, Callable
 from .store import Store, NotFound
 
 #: Sections that are never dropped by the budget trimmer.
-PINNED = ("project", "role", "goal", "current_phase", "status")
+PINNED = ("project", "role", "goal", "current_phase", "status", "profile")
 
 #: Fallback ordering when a role profile does not declare visible_context.
 DEFAULT_VISIBLE = [
-    "project", "role", "goal", "current_phase", "status", "locked_decisions",
-    "dependencies", "deliverables", "handoff", "evaluation_axes", "prohibitions",
+    "project", "role", "goal", "profile", "current_phase", "status",
+    "locked_decisions", "dependencies", "deliverables", "handoff",
+    "evaluation_axes", "prohibitions",
 ]
+
+#: 「私について」に載せる最大件数。全AIへ毎回渡るので絞る。
+PROFILE_LIMIT = 12
 
 
 def estimate_tokens(text: str) -> int:
@@ -74,6 +78,11 @@ def _decision_line(decision: dict[str, Any]) -> str:
     if decision.get("body"):
         text = f"{text} — {decision['body']}"
     return f"- {decision['id']} {text}"
+
+
+def _b_profile(data: dict[str, Any]) -> list[str]:
+    """企画に関係なく、依頼主について全AIが知っておくべきこと。"""
+    return [f"- {item['body']}" for item in data["profile"][:PROFILE_LIMIT]]
 
 
 def _b_project(data: dict[str, Any]) -> list[str]:
@@ -184,6 +193,7 @@ def _b_recent_changes(data: dict[str, Any]) -> list[str]:
 
 
 BUILDERS: dict[str, tuple[str, Callable[[dict[str, Any]], list[str]]]] = {
+    "profile": ("ABOUT THE USER", _b_profile),
     "project": ("PROJECT", _b_project),
     "summary": ("SUMMARY", _b_summary),
     "current_phase": ("CURRENT PHASE", _b_current_phase),
@@ -248,6 +258,7 @@ class ContextRouter:
     def _project_data(self, project_id: str) -> dict[str, Any]:
         data = self.store.project_overview(project_id)
         data["agents"] = self.store.list_agents()
+        data["profile"] = self.store.list_profile()
         # Dependency nodes are written as ids ("GR-01") while phases carry a
         # label ("GR-01 MEMBRANE"), so index the status under both.
         status_map: dict[str, str] = {}

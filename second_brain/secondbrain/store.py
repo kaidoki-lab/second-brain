@@ -504,6 +504,66 @@ class Store:
                             project_id=handoff["project_id"], actor=actor)
         return handoff
 
+    # -------------------------------------------------------- 私について
+
+    def add_profile(self, body: str, category: str = "", tags: Any = None,
+                    priority: int = 50, source: str = "", actor: str = ""
+                    ) -> dict[str, Any] | None:
+        """人物像の1項目を追加する。同じ内容は二重に入らない。"""
+        body = (body or "").strip()
+        if not body:
+            raise Invalid("内容を入力してください")
+        ts = now()
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO profile(category, body, tags, priority, source,"
+                " created_at, updated_at) VALUES (?,?,?,?,?,?,?)"
+                " ON CONFLICT(body) DO UPDATE SET category=excluded.category,"
+                " tags=excluded.tags, priority=excluded.priority,"
+                " updated_at=excluded.updated_at",
+                (category, body, _json_list(tags), priority, source, ts, ts))
+            if cur.rowcount:
+                self.log_change("profile", str(cur.lastrowid), "saved", body[:80],
+                                actor=actor)
+        return self.get_profile_by_body(body)
+
+    def get_profile_by_body(self, body: str) -> dict[str, Any] | None:
+        return row_to_dict(self.conn.execute(
+            "SELECT * FROM profile WHERE body = ?", (body.strip(),)).fetchone())
+
+    def get_profile(self, id: int) -> dict[str, Any] | None:
+        return row_to_dict(self.conn.execute(
+            "SELECT * FROM profile WHERE id = ?", (id,)).fetchone())
+
+    def list_profile(self, category: str | None = None, limit: int = 500
+                     ) -> list[dict[str, Any]]:
+        """優先度の高い順。同点なら登録順。"""
+        sql = "SELECT * FROM profile"
+        args: list[Any] = []
+        if category:
+            sql += " WHERE category = ?"
+            args.append(category)
+        sql += " ORDER BY priority DESC, id LIMIT ?"
+        args.append(limit)
+        return rows_to_dicts(self.conn.execute(sql, args))
+
+    def delete_profile(self, id: int, actor: str = "") -> dict[str, Any]:
+        item = self.get_profile(id)
+        if item is None:
+            raise NotFound(f"見つかりません: profile {id}")
+        with self.conn:
+            self.conn.execute("DELETE FROM profile WHERE id = ?", (id,))
+            self.log_change("profile", str(id), "removed", item["body"][:80],
+                            actor=actor)
+        return item
+
+    def clear_profile(self, actor: str = "") -> int:
+        with self.conn:
+            count = self.conn.execute("SELECT COUNT(*) FROM profile").fetchone()[0]
+            self.conn.execute("DELETE FROM profile")
+            self.log_change("profile", "*", "cleared", f"{count} 件", actor=actor)
+        return count
+
     # -------------------------------------------------------------- relations
 
     def add_relation(self, project_id: str, src: str, rel: str, dst: str,

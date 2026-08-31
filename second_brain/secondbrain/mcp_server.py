@@ -47,6 +47,12 @@ TOOLS: list[dict[str, Any]] = [
             "status": {"type": "string", "description": "ACTIVE などで絞り込む"}}},
     },
     {
+        "name": "get_profile",
+        "description": "依頼主について全AIが共有している前提（進め方の好みなど）。",
+        "inputSchema": {"type": "object", "properties": {
+            "category": {"type": "string"}}},
+    },
+    {
         "name": "get_project_state",
         "description": "プロジェクトの現在地（現フェーズ、状態、担当、依存、LOCKED決定）。",
         "inputSchema": {"type": "object", "properties": {
@@ -140,6 +146,8 @@ class MCPServer:
         store = self.store
         if name == "list_projects":
             return _json(store.list_projects(args.get("status")))
+        if name == "get_profile":
+            return _json(store.list_profile(args.get("category")))
         if name == "get_project_state":
             pid = args["project"]
             overview = store.project_overview(pid)

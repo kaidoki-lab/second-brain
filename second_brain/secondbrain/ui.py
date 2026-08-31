@@ -79,6 +79,7 @@ NAV = [
     ("/handoffs", "ハンドオフ"),
     ("/import", "取り込み"),
     ("/projects", "企画"),
+    ("/profile", "私について"),
     ("/agents", "AI設定"),
 ]
 
@@ -167,6 +168,8 @@ def dashboard(store: Store, message: str = "") -> str:
              '<span>フォルダを指定して自動で探します</span></a>'
              '<a class="big" href="/handoffs">🔍 ハンドオフを探す'
              f'<span>登録済み {len(handoffs)} 件から検索</span></a>'
+             '<a class="big" href="/profile">👤 私について'
+             f'<span>全AI共通の前提 {len(store.list_profile())} 件</span></a>'
              '</div>')
 
     if missing:
@@ -450,6 +453,100 @@ def _fact_form(pid: str) -> str:
             '<label>タグ（カンマ区切り・任意）</label>'
             '<input name="tags" placeholder="constraint, asset, world">'
             '<div class="actions"><button type="submit">追加</button></div></form>')
+
+
+# ============================================================== 私について
+
+def _profile_paste_form(text: str, category: str) -> str:
+    return (
+        '<form method="post" action="/ui/profile">'
+        '<div class="row"><div><label>分類（任意）</label>'
+        f'<input name="category" value="{e(category)}" '
+        'placeholder="例: 進め方 / 環境 / 好み"></div></div>'
+        '<label>AIの回答を貼り付け</label>'
+        f'<textarea name="text" rows="10" placeholder="ここに貼り付け">{e(text)}</textarea>'
+        '<div class="actions"><button type="submit" name="action" value="preview">'
+        '内容を確認する</button></div></form>')
+
+
+def _profile_preview(items: list[dict[str, Any]], category: str) -> str:
+    checks = "".join(
+        '<label style="margin:0 0 8px">'
+        f'<input type="checkbox" name="item" value="{e(item["body"])}" checked '
+        'style="width:auto;margin-right:8px">'
+        f'{e(item["body"])}'
+        + "".join(f'<span class="tag">{e(t)}</span>' for t in item["tags"])
+        + "</label>"
+        for item in items)
+    return (
+        '<p class="dim">不要な行（前置きの文など）はチェックを外してください。</p>'
+        '<form method="post" action="/ui/profile">'
+        f'<input type="hidden" name="category" value="{e(category)}">'
+        + checks +
+        '<div class="actions"><button type="submit" name="action" value="apply">'
+        'この内容で保存する</button></div></form>')
+
+
+def _profile_row(item: dict[str, Any]) -> list[str]:
+    delete = (
+        '<form method="post" action="/ui/profile/delete" '
+        "onsubmit=\"return confirm('この項目を削除しますか？')\">"
+        f'<input type="hidden" name="id" value="{e(item["id"])}">'
+        '<button class="danger" type="submit">削除</button></form>')
+    tags = "".join(f'<span class="tag">{e(t)}</span>' for t in item["tags"])
+    return [e(item["body"]) + tags,
+            e(item["category"]) or '<span class="dim">-</span>', delete]
+
+
+def profile_page(store: Store, items: list[dict[str, Any]] | None = None,
+                 text: str = "", category: str = "", message: str = "") -> str:
+    """全AI共通の前提「私について」の管理画面。"""
+    from .context import PROFILE_LIMIT
+    saved = store.list_profile()
+
+    body = flash(message)
+    body += '<h2 class="page">私について</h2>'
+    body += ('<p class="lead">企画に関係なく、どのAIにも毎回渡る前提です。'
+             'ChatGPTやClaudeが覚えているあなたの情報を、ここへ集約できます。</p>')
+    body += ('<div class="note"><b>取り出し方</b>: ChatGPTやClaudeにこう聞いてください。'
+             '<br><code>私について記憶していることを、1行に1件ずつ、箇条書きで'
+             '全部書き出してください。</code><br>'
+             'その回答をそのまま下の枠に貼り付ければ取り込めます。<br><br>'
+             '⚠️ パスワード・住所・口座番号などは入れないでください。'
+             'ここに入れた内容は、あなたが使うすべてのAIへ渡ります。</div>')
+
+    body += ('<div class="grid">'
+             + card("貼り付けて取り込む", _profile_paste_form(text, category),
+                    wide=True) + "</div>")
+
+    if items:
+        body += ('<div class="grid" style="margin-top:18px">'
+                 + card(f"取り込む項目を選ぶ（{len(items)} 件）",
+                        _profile_preview(items, category), wide=True) + "</div>")
+
+    note = ""
+    if len(saved) > PROFILE_LIMIT:
+        note = (f'<p class="warn">※ AIへ渡るのは優先度の高い上位 {PROFILE_LIMIT} 件'
+                f'です（現在 {len(saved)} 件登録）。</p>')
+    body += ('<div class="grid" style="margin-top:18px">' + card(
+        f"登録済み（{len(saved)} 件）",
+        note + table(["内容", "分類", ""], [_profile_row(i) for i in saved],
+                     "まだ登録がありません。上の枠に貼り付けてください。"),
+        wide=True) + "</div>")
+
+    if saved:
+        export = "私について\\n" + "\\n".join(f"- {i['body']}" for i in saved)
+        copy_js = ("var t=document.getElementById('profile-export');t.select();"
+                   "document.execCommand('copy');this.textContent='コピーしました'")
+        body += ('<div class="grid" style="margin-top:18px">' + card(
+            "AIに渡す用（コピー）",
+            '<p class="dim">新しいAIチャットを始めるとき、これを貼れば前提が揃います。'
+            '</p>'
+            '<textarea id="profile-export" rows="8" onclick="this.select()" readonly>'
+            f'{e(export)}</textarea>'
+            f'<div class="actions"><button type="button" onclick="{copy_js}">'
+            '全部コピー</button></div>', wide=True) + "</div>")
+    return page("私について", body, "/profile")
 
 
 # ================================================================ AI設定

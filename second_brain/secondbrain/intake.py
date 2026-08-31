@@ -106,6 +106,37 @@ def parse_result(text: str) -> dict[str, Any]:
     return parsed
 
 
+#: 箇条書きの記号や番号を落とすための形。
+BULLET_RE = re.compile(r"^\s*(?:[-*・‣▪、]|\d+[.)、]|[（(]\d+[）)])\s*")
+#: 1項目の長さ上限（長文はメモではなく資料なので弾く）。
+MEMORY_ITEM_MAX = 300
+
+
+def parse_memory(text: str, category: str = "") -> list[dict[str, Any]]:
+    """AIが書き出した「あなたについての記憶」を1行1件に整える。
+
+    見出し・空行・記号だけの行は落とす。行末の #タグ は分けて取り出す。
+    """
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") and " " not in line[:3]:
+            continue
+        if set(line) <= {"-", "=", "―", "─", "*", "・"}:
+            continue
+        line = BULLET_RE.sub("", line).strip()
+        if not line or len(line) > MEMORY_ITEM_MAX:
+            continue
+        tags = re.findall(r"#([^\s#]+)", line)
+        body = re.sub(r"\s*#[^\s#]+", "", line).strip(" 　:：")
+        if not body or body in seen:
+            continue
+        seen.add(body)
+        items.append({"body": body, "tags": tags, "category": category})
+    return items
+
+
 def current_phase_of(phases: list[dict[str, Any]]) -> dict[str, Any] | None:
     """いま取り組む工程＝最初の作業中。無ければ最初の未着手。"""
     for status in ("IN_PROGRESS", "BLOCKED", "WAITING", "PENDING"):

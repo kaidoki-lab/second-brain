@@ -17,7 +17,7 @@ from .config import Config
 from .context import ContextRouter
 from .http_util import HttpError, Request, Response
 from .bundle import build_bundle
-from .intake import apply_result, parse_result
+from .intake import apply_result, parse_memory, parse_result
 from .scan import DEFAULT_KEYWORDS, import_handoffs
 from .store import Invalid, NotFound, Store, slugify_id
 
@@ -398,6 +398,55 @@ def ui_do_intake(app: App, request: Request, params: dict[str, str]) -> Response
 @route("GET", "/projects")
 def ui_projects(app: App, request: Request, _: dict[str, str]) -> Response:
     return Response.html(ui.projects_page(app.store, request.q("msg", "") or ""))
+
+
+@route("GET", "/profile")
+def ui_profile(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.html(ui.profile_page(app.store, message=request.q("msg", "") or ""))
+
+
+@route("POST", "/ui/profile")
+def ui_save_profile(app: App, request: Request, _: dict[str, str]) -> Response:
+    """AIが書き出した記憶を、確認のうえ「私について」へ保存する。"""
+    form = request.payload()
+    category = str(form.get("category", "")).strip()
+    if form.get("action") == "apply":
+        bodies = request.payload_list("item")
+        for body in bodies:
+            app.store.add_profile(body, category=category, source="ai-memory",
+                                  actor="ui")
+        return Response.redirect("/profile?msg=" + quote(
+            f"{len(bodies)} 件を保存しました"))
+    text = str(form.get("text", ""))
+    items = parse_memory(text, category)
+    return Response.html(ui.profile_page(app.store, items, text, category))
+
+
+@route("POST", "/ui/profile/delete")
+def ui_delete_profile(app: App, request: Request, _: dict[str, str]) -> Response:
+    form = request.payload()
+    try:
+        item_id = int(str(form.get("id", "")))
+    except ValueError as exc:
+        raise HttpError(400, "削除する項目が指定されていません") from exc
+    app.store.delete_profile(item_id, actor="ui")
+    return Response.redirect("/profile?msg=" + quote("1 件削除しました"))
+
+
+@route("GET", "/api/profile")
+def api_profile(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.json(app.store.list_profile(request.q("category")))
+
+
+@route("POST", "/api/profile")
+def post_profile(app: App, request: Request, _: dict[str, str]) -> Response:
+    payload = app._payload(request)
+    app._require(payload, "body")
+    item = app.store.add_profile(
+        payload["body"], payload.get("category", ""), payload.get("tags"),
+        int(payload.get("priority", 50)), payload.get("source", ""),
+        actor=payload.get("actor", ""))
+    return app._written(request, item, "/profile")
 
 
 @route("GET", "/agents")

@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS changes (
     created_at  TEXT NOT NULL
 );
 
+-- 企画に属さない「私について」。全AIが共通の前提として読む。
+CREATE TABLE IF NOT EXISTS profile (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category    TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL,
+    tags        TEXT NOT NULL DEFAULT '[]',
+    priority    INTEGER NOT NULL DEFAULT 50,
+    source      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -135,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_handoffs_project ON handoffs(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_relations_project ON relations(project_id, src);
 CREATE INDEX IF NOT EXISTS idx_relations_dst ON relations(project_id, dst);
 CREATE INDEX IF NOT EXISTS idx_changes_created ON changes(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_body ON profile(body);
 """
 
 

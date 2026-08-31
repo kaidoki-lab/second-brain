@@ -18,6 +18,7 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "goal": "企画全体を前進させる",
         "priority": "最短で安全に工程を進める",
         "visible_context": [
+            "profile",
             "project", "current_phase", "status", "owner", "implementation_state",
             "dependencies", "deliverables", "locked_decisions", "handoff",
             "agents", "recent_changes",
@@ -32,6 +33,7 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "goal": "視覚・体験設計",
         "priority": "世界観の一貫性を保ったまま現フェーズを完成させる",
         "visible_context": [
+            "profile",
             "project", "current_phase", "status", "world", "assets", "constraints",
             "locked_decisions", "dependencies", "deliverables", "handoff",
         ],
@@ -45,6 +47,7 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "goal": "実装",
         "priority": "確定仕様どおりに、壊さず作る",
         "visible_context": [
+            "profile",
             "project", "current_phase", "status", "implementation_state", "api",
             "locked_decisions", "constraints", "files", "dependencies",
             "deliverables", "handoff",
@@ -59,6 +62,7 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "goal": "企画の弱点を発見する",
         "priority": "破綻を早期に見つける",
         "visible_context": [
+            "profile",
             "project", "current_phase", "status", "locked_decisions",
             "open_decisions", "constraints", "dependencies", "failures",
             "implementation_state",
@@ -72,7 +76,8 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "name": "Explorer AI",
         "goal": "現在案と異なる可能性を探す",
         "priority": "既存案の外側を出す",
-        "visible_context": ["project", "summary", "constraints", "locked_decisions"],
+        "visible_context": ["profile", "project", "summary", "constraints",
+                            "locked_decisions"],
         "hidden_context": [
             "assets", "world", "files", "handoff", "implementation_state",
             "open_decisions", "recent_changes", "relations", "agents",
