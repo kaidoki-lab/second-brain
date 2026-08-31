@@ -22,10 +22,14 @@
 
 ## 起動
 
+**Windows: `start.bat` をダブルクリックするだけ。** ブラウザが自動で開きます。
+
+コマンドで起動する場合:
+
 ```bash
-python run.py init            # DB作成＋既定ロール5種を投入
-python run.py seed            # サンプル（SYNAPTIC GROVE）を投入
+python run.py init            # 初回のみ: DB作成＋既定ロール5種を投入
 python run.py serve           # http://127.0.0.1:8765
+python run.py seed            # 任意: サンプル（SYNAPTIC GROVE）を投入
 ```
 
 LAN公開（タブレットや別PCから見る場合）は APIキー必須：
@@ -47,22 +51,44 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | --- | --- |
 | `init` | DB作成と既定ロール投入 |
 | `seed` | サンプルプロジェクト投入 |
-| `serve [--host --port --api-key --budget]` | Webサーバー |
+| `serve [--host --port --api-key --budget --open]` | Webサーバー（`--open` でブラウザ自動起動） |
 | `mcp` | MCP server (stdio) |
 | `context <role> [--project] [--budget]` | 役割別コンテキストを標準出力へ |
 | `index --project P --dir DIR [--pattern *.md] [--recursive]` | 既存ハンドオフを索引（本文は読まない） |
+| `scan --project P --dir DIR [--keywords ハンドオフ,handoff]` | 名前で自動検出して一括登録 |
 | `verify [--project P]` | 索引したファイルの存在確認 |
 | `export [--out brain.md]` | brain.md を書き出す |
 | `key` | APIキー生成 |
 
-## ブラウザUI
+## ブラウザUI（日本語・コマンド不要）
 
 | URL | 内容 |
 | --- | --- |
-| `/` | PROJECTS / ACTIVE PHASES / AI AGENTS / DECISIONS / HANDOFFS / DEPENDENCIES / RECENT CHANGES |
-| `/project/{id}` | 現在地、フェーズ履歴、決定、事実、ハンドオフ、関係＋各種入力フォーム |
-| `/agents` | ロールプロファイル（見せる情報／隠す情報／評価軸／禁止事項）一覧 |
-| `/preview/context/{role}` | そのAIへ実際に渡るコンテキストとトークン数の確認 |
+| `/` | ダッシュボード。企画一覧、最近の変更、行方不明ファイルの警告 |
+| `/import` | **ハンドオフの取り込み**。フォルダを指定すると、名前に「ハンドオフ」を含むファイルを自動で探して登録 |
+| `/handoffs` | **ハンドオフ一覧と検索**。企画の付け替え、存在確認、一覧からの除外 |
+| `/projects` | 企画の一覧と作成（名前だけ入れればIDは自動生成、日本語可） |
+| `/project/{id}` | 現在の工程、決定事項、事実、ハンドオフ＋入力フォーム |
+| `/agents` | AIごとの「見せる情報／見せない情報／評価軸／禁止事項」 |
+| `/preview/context/{role}` | そのAIへ実際に渡る文章とトークン数（コピーして貼るだけ） |
+
+### PC内のハンドオフを取りまとめる
+
+ファイル名に「ハンドオフ」または「handoff」が入っていれば、置き場所がバラバラでも拾えます。
+
+1. `/import` を開く
+2. 探すフォルダを入力（例 `D:\projects`）
+3. 「この条件で取り込む」を押す
+
+サブフォルダも辿ります。`node_modules` `.git` `Windows` `Program Files` などは自動で除外。
+同じファイルを二度取り込んでも重複しません。**中身は読まず、移動もしません。**
+
+コマンドで一括登録する場合:
+
+```bash
+python run.py scan --project 未分類 --dir "D:\projects" --keywords "ハンドオフ,handoff"
+python run.py verify        # 登録したファイルがまだ存在するか確認
+```
 
 ## AI向け API
 

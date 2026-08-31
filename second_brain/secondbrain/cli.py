@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int)
     serve.add_argument("--api-key")
     serve.add_argument("--budget", type=int, help="context のトークン上限")
+    serve.add_argument("--open", action="store_true",
+                       help="起動後にブラウザを自動で開く")
 
     sub.add_parser("mcp", help="MCP server (stdio) 起動")
 
@@ -47,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     ctx.add_argument("role")
     ctx.add_argument("--project")
     ctx.add_argument("--budget", type=int, default=2000)
+
+    scan = sub.add_parser("scan", help="ファイル名で自動検出して一括登録（本文は読まない）")
+    scan.add_argument("--project", required=True)
+    scan.add_argument("--dir", required=True)
+    scan.add_argument("--keywords", default="ハンドオフ,handoff",
+                      help="ファイル名に含まれる語（カンマ区切り）")
+    scan.add_argument("--owner", default="")
 
     index = sub.add_parser("index", help="既存ハンドオフを索引に登録（本文は読まない）")
     index.add_argument("--project", required=True)
@@ -112,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         config.port = args.port or config.port
         config.api_key = args.api_key or config.api_key
         config.token_budget = args.budget or config.token_budget
-        server_module.serve(App(store, config), config)
+        server_module.serve(App(store, config), config, open_browser=args.open)
         return 0
 
     if args.command == "mcp":
@@ -125,6 +134,21 @@ def main(argv: list[str] | None = None) -> int:
         print(result["text"])
         print(f"\n--- ≈{result['token_estimate']} tokens "
               f"(budget {result['token_budget']})", file=sys.stderr)
+        return 0
+
+    if args.command == "scan":
+        from .scan import import_handoffs
+        keywords = tuple(k.strip() for k in args.keywords.split(",") if k.strip())
+        store.upsert_project(args.project, args.project, actor="cli")
+        result = import_handoffs(store, args.project, args.dir, keywords,
+                                 owner=args.owner, actor="cli")
+        if result.get("error"):
+            print(result["error"])
+            return 1
+        print(f"新規 {len(result['added'])} 件 / 登録済み {len(result['already'])} 件"
+              f" / 調べたファイル {result['scanned']} 件 ({result['seconds']}秒)")
+        for handoff in result["added"]:
+            print(f"  {handoff['id']}  {handoff['file_path']}")
         return 0
 
     if args.command == "index":

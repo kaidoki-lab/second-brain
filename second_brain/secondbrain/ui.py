@@ -1,7 +1,7 @@
-"""Server-rendered browser UI (spec PHASE 2).
+"""ブラウザ画面（日本語UI）。
 
-No build step, no framework, no CDN: one stylesheet inlined into every page so
-the UI works on a LAN with no internet, and on old tablet browsers.
+外部CSS・JSフレームワークは使わない。LANだけで完結し、古い端末でも開ける。
+操作はすべてボタンとフォームで完結させ、コマンド入力を前提にしない。
 """
 
 from __future__ import annotations
@@ -16,53 +16,83 @@ STYLE = """
         --fg:#e6edf3; --dim:#8b949e; --accent:#5ac8fa; --ok:#3fb950;
         --warn:#d29922; --bad:#f85149; }
 * { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.7
        -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; }
-header { padding:14px 20px; border-bottom:1px solid var(--line);
-         display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
-header h1 { font-size:16px; margin:0; letter-spacing:.16em; }
-header a { color:var(--dim); text-decoration:none; font-size:13px; }
-header a:hover { color:var(--accent); }
-main { padding:20px; max-width:1200px; margin:0 auto; }
+header { padding:12px 20px; border-bottom:1px solid var(--line);
+         display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+header h1 { font-size:15px; margin:0 14px 0 0; letter-spacing:.14em;
+            white-space:nowrap; }
+nav a { color:var(--dim); text-decoration:none; font-size:14px; padding:6px 12px;
+        border-radius:6px; display:inline-block; }
+nav a:hover { color:var(--fg); background:#1d232c; }
+nav a.on { color:var(--fg); background:#1d232c; }
+main { padding:20px; max-width:1240px; margin:0 auto; }
+h2.page { font-size:20px; margin:0 0 4px; }
+p.lead { color:var(--dim); margin:0 0 18px; }
 .grid { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start; }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:8px;
-        padding:14px 16px; flex:1 1 320px; min-width:300px; }
-.card h2 { font-size:12px; letter-spacing:.18em; color:var(--dim);
-           margin:0 0 10px; text-transform:uppercase; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+        padding:16px 18px; flex:1 1 340px; min-width:300px; }
+.card.wide { flex-basis:100%; }
+.card h3 { font-size:13px; letter-spacing:.1em; color:var(--dim); margin:0 0 12px; }
 table { width:100%; border-collapse:collapse; }
-td, th { padding:6px 8px; text-align:left; border-bottom:1px solid var(--line);
+td, th { padding:8px; text-align:left; border-bottom:1px solid var(--line);
          vertical-align:top; }
-th { color:var(--dim); font-weight:500; font-size:12px; }
+th { color:var(--dim); font-weight:500; font-size:13px; white-space:nowrap; }
 tr:last-child td { border-bottom:none; }
 a { color:var(--accent); }
-code, pre { font-family:ui-monospace, SFMono-Regular, Consolas, monospace; }
-pre { background:#0b0f14; border:1px solid var(--line); border-radius:6px;
-      padding:14px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; }
-.tag { display:inline-block; padding:1px 7px; border-radius:99px; font-size:11px;
-       border:1px solid var(--line); color:var(--dim); }
+code { font-family:ui-monospace, Consolas, monospace; font-size:13px; }
+.path { font-family:ui-monospace, Consolas, monospace; font-size:12px;
+        color:var(--dim); word-break:break-all; }
+.tag { display:inline-block; padding:1px 9px; border-radius:99px; font-size:12px;
+       border:1px solid var(--line); color:var(--dim); white-space:nowrap; }
 .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
 .dim { color:var(--dim); }
 form { margin:0; } input, select, textarea, button { font:inherit; }
-input, select, textarea { background:#0b0f14; color:var(--fg); padding:6px 8px;
-       border:1px solid var(--line); border-radius:6px; width:100%; }
-button { background:var(--accent); color:#04121c; border:0; border-radius:6px;
-         padding:7px 14px; font-weight:600; cursor:pointer; }
-label { display:block; margin:8px 0 2px; font-size:12px; color:var(--dim); }
-.row { display:flex; gap:10px; flex-wrap:wrap; }
-.row > * { flex:1 1 140px; }
-.empty { color:var(--dim); font-style:italic; }
+input, select, textarea { background:#0b0f14; color:var(--fg); padding:9px 11px;
+       border:1px solid var(--line); border-radius:8px; width:100%; }
+button { background:var(--accent); color:#04121c; border:0; border-radius:8px;
+         padding:10px 18px; font-weight:700; cursor:pointer; }
+button.sub { background:#2b3542; color:var(--fg); font-weight:500;
+             padding:7px 12px; font-size:13px; }
+button.danger { background:#5a2020; color:#ffbdbd; font-weight:500;
+                padding:7px 12px; font-size:13px; }
+button:hover { filter:brightness(1.1); }
+label { display:block; margin:12px 0 4px; font-size:13px; color:var(--dim); }
+.row { display:flex; gap:12px; flex-wrap:wrap; }
+.row > * { flex:1 1 180px; }
+.actions { margin-top:16px; }
+.big { display:inline-block; padding:18px 22px; background:#1d5f8f; color:#fff;
+       border:1px solid #2f88c8; border-radius:10px; text-decoration:none;
+       font-weight:700; margin:0 12px 12px 0; min-width:230px; }
+.big span { display:block; font-weight:400; font-size:13px; color:#bcdcf3;
+            margin-top:4px; }
+.empty { color:var(--dim); }
+.note { background:#0b0f14; border:1px solid var(--line); border-radius:8px;
+        padding:12px 14px; color:var(--dim); font-size:13px; margin:14px 0; }
+.flash { border-left:4px solid var(--ok); background:#12241a; padding:12px 16px;
+         border-radius:8px; margin-bottom:18px; }
+.flash.bad { border-left-color:var(--bad); background:#2a1416; }
 """
 
+NAV = [
+    ("/", "ダッシュボード"),
+    ("/handoffs", "ハンドオフ"),
+    ("/import", "取り込み"),
+    ("/projects", "企画"),
+    ("/agents", "AI設定"),
+]
 
-def page(title: str, body: str) -> str:
+
+def page(title: str, body: str, current: str = "") -> str:
+    links = "".join(
+        f'<a href="{href}" class="{"on" if href == current else ""}">{label}</a>'
+        for href, label in NAV)
     return (
-        "<!doctype html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{escape(title)}</title><style>{STYLE}</style></head><body>"
-        "<header><h1>SECOND BRAIN</h1>"
-        "<a href=\"/\">DASHBOARD</a><a href=\"/agents\">AI AGENTS</a>"
-        "<a href=\"/brain.md\">brain.md</a><a href=\"/api/brain\">api/brain</a>"
-        "</header><main>" + body + "</main></body></html>"
+        f'<header><h1>第二の脳</h1><nav>{links}</nav></header><main>{body}</main>'
+        "</body></html>"
     )
 
 
@@ -70,269 +100,405 @@ def e(value: Any) -> str:
     return escape("" if value is None else str(value))
 
 
-def card(title: str, body: str) -> str:
-    return f"<section class=\"card\"><h2>{escape(title)}</h2>{body}</section>"
+def card(title: str, body: str, wide: bool = False) -> str:
+    cls = "card wide" if wide else "card"
+    return f'<section class="{cls}"><h3>{escape(title)}</h3>{body}</section>'
 
 
-def table(headers: list[str], rows: list[list[str]], empty: str = "なし") -> str:
+def table(headers: list[str], rows: list[list[str]], empty: str = "まだありません"
+          ) -> str:
     if not rows:
-        return f"<p class=\"empty\">{escape(empty)}</p>"
+        return f'<p class="empty">{escape(empty)}</p>'
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
                    for row in rows)
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
+STATUS_JA = {
+    "ACTIVE": "進行中", "COMPLETE": "完了", "IN_PROGRESS": "作業中",
+    "BLOCKED": "停止中", "WAITING": "待ち", "LOCKED": "確定", "PROPOSED": "検討中",
+    "SUPERSEDED": "破棄", "ARCHIVED": "保管",
+}
+
+
 def status_badge(status: str) -> str:
-    cls = {"COMPLETE": "ok", "LOCKED": "ok", "ACTIVE": "ok",
-           "IN_PROGRESS": "warn", "PROPOSED": "warn", "BLOCKED": "bad",
-           "SUPERSEDED": "dim"}.get(status, "dim")
-    return f"<span class=\"tag {cls}\">{escape(status)}</span>"
+    cls = {"COMPLETE": "ok", "LOCKED": "ok", "ACTIVE": "ok", "IN_PROGRESS": "warn",
+           "PROPOSED": "warn", "BLOCKED": "bad", "SUPERSEDED": "dim"}.get(status, "dim")
+    return f'<span class="tag {cls}">{escape(STATUS_JA.get(status, status))}</span>'
 
 
-# ------------------------------------------------------------------- pages
+def file_flag(exists: bool) -> str:
+    return ('<span class="ok">あり</span>' if exists
+            else '<span class="bad">見つからない</span>')
 
-def dashboard(store: Store) -> str:
+
+def flash(message: str, bad: bool = False) -> str:
+    if not message:
+        return ""
+    cls = "flash bad" if bad else "flash"
+    return f'<div class="{cls}">{escape(message)}</div>'
+
+
+def project_options(store: Store, selected: str = "", blank: str = "") -> str:
+    out = f'<option value="">{escape(blank)}</option>' if blank else ""
+    for project in store.list_projects():
+        mark = " selected" if project["id"] == selected else ""
+        out += (f'<option value="{e(project["id"])}"{mark}>'
+                f'{e(project["name"])}</option>')
+    return out
+
+
+# ============================================================ ダッシュボード
+
+def dashboard(store: Store, message: str = "") -> str:
     projects = store.list_projects()
-    project_rows = []
-    active_rows = []
+    handoffs = store.list_handoffs()
+    missing = [h for h in handoffs if not h["file_exists"]]
+
+    body = flash(message)
+    body += '<h2 class="page">ダッシュボード</h2>'
+    body += ('<p class="lead">PC内のハンドオフと、企画ごとの決定事項をまとめて'
+             '管理します。ファイルは移動しません。場所を覚えておくだけです。</p>')
+
+    body += ('<div>'
+             '<a class="big" href="/import">📥 ハンドオフを取り込む'
+             '<span>フォルダを指定して自動で探します</span></a>'
+             '<a class="big" href="/handoffs">🔍 ハンドオフを探す'
+             f'<span>登録済み {len(handoffs)} 件から検索</span></a>'
+             '</div>')
+
+    if missing:
+        body += ('<div class="note"><span class="bad">'
+                 f'ファイルが見つからないハンドオフが {len(missing)} 件あります。</span>'
+                 ' 移動または削除された可能性があります。'
+                 ' <a href="/handoffs?missing=1">確認する</a></div>')
+
+    rows = []
     for project in projects:
         state = store.current_state(project["id"])
-        project_rows.append([
-            f"<a href=\"/project/{e(project['id'])}\">{e(project['name'])}</a>",
+        count = len(store.list_handoffs(project["id"]))
+        rows.append([
+            f'<a href="/project/{e(project["id"])}">{e(project["name"])}</a>',
             status_badge(project["status"]),
-            e(state["phase"] if state else "-"),
+            e(state["phase"]) if state else '<span class="dim">-</span>',
+            f'{count} 件',
         ])
-        if state:
-            active_rows.append([e(project["name"]), e(state["phase"]),
-                                status_badge(state["status"]),
-                                e(state["owner"] or "-")])
 
-    agent_rows = [[e(a["id"]), e(a["name"]), e(a["role"]),
-                   f"<a href=\"/preview/context/{e(a['id'])}\">context</a>"]
-                  for a in store.list_agents()]
+    changes = [[e(c["created_at"][5:16].replace("T", " ")), e(c["entity"]),
+                e(c["summary"])] for c in store.recent_changes(10)]
 
-    decisions, handoffs, relations = [], [], []
-    for project in projects:
-        pid = project["id"]
-        for d in store.list_decisions(pid)[-6:]:
-            decisions.append([e(d["id"]), e(d["title"]), status_badge(d["status"])])
-        for h in store.list_handoffs(pid):
-            flag = "<span class=\"ok\">OK</span>" if h["file_exists"] \
-                else "<span class=\"bad\">MISSING</span>"
-            handoffs.append([e(h["id"]), f"<code>{e(h['file_path'])}</code>",
-                             e(h["owner"]), flag])
-        for r in store.list_relations(pid):
-            relations.append([e(r["src"]), f"<span class=\"dim\">{e(r['rel'])}</span>",
-                              e(r["dst"])])
-
-    changes = [[e(c["created_at"][11:19]), e(c["entity"]), e(c["action"]),
-                e(c["summary"])] for c in store.recent_changes(12)]
-
-    body = "<div class=\"grid\">"
-    body += card("PROJECTS", table(["PROJECT", "STATUS", "PHASE"], project_rows,
-                                   "プロジェクト未登録"))
-    body += card("ACTIVE PHASES", table(["PROJECT", "PHASE", "STATUS", "OWNER"],
-                                        active_rows, "進行中フェーズなし"))
-    body += card("AI AGENTS", table(["ID", "NAME", "ROLE", ""], agent_rows))
-    body += card("DECISIONS", table(["ID", "TITLE", "STATUS"], decisions))
-    body += card("HANDOFFS", table(["ID", "PATH", "OWNER", "FILE"], handoffs))
-    body += card("DEPENDENCIES", table(["SRC", "REL", "DST"], relations))
-    body += card("RECENT CHANGES", table(["TIME", "ENTITY", "ACTION", "SUMMARY"],
-                                         changes))
+    body += '<div class="grid">'
+    body += card("企画", table(["企画", "状態", "現在の工程", "ハンドオフ"], rows,
+                               "企画がまだありません。取り込み時に作成できます。"))
+    body += card("最近の変更", table(["日時", "種類", "内容"], changes))
     body += "</div>"
-    body += "<div class=\"grid\" style=\"margin-top:16px\">" \
-            + card("NEW PROJECT", _project_form()) + "</div>"
-    return page("SECOND BRAIN", body)
+    return page("第二の脳", body, "/")
 
 
-def _project_form() -> str:
-    return (
-        "<form method=\"post\" action=\"/api/project\">"
-        "<div class=\"row\"><div><label>id</label>"
-        "<input name=\"id\" placeholder=\"synaptic_grove\" required></div>"
-        "<div><label>name</label><input name=\"name\" placeholder=\"SYNAPTIC GROVE\">"
-        "</div></div>"
-        "<label>summary</label><input name=\"summary\">"
-        "<p><button type=\"submit\">CREATE</button></p></form>"
-    )
+# ============================================================== ハンドオフ
+
+def handoff_list(store: Store, query: str = "", project: str = "",
+                 missing_only: bool = False, message: str = "") -> str:
+    results = store.search_handoffs(query, project or None,
+                                    missing_only=missing_only)
+    total = len(store.list_handoffs())
+
+    body = flash(message)
+    body += '<h2 class="page">ハンドオフ一覧</h2>'
+    body += (f'<p class="lead">登録済み {total} 件。ファイルの中身は読み込まず、'
+             '置き場所だけを覚えています。</p>')
+
+    search = (
+        '<form method="get" action="/handoffs"><div class="row">'
+        '<div style="flex:2 1 260px"><label>キーワード（ファイル名・工程・担当）</label>'
+        f'<input name="q" value="{e(query)}" placeholder="例: GR-02"></div>'
+        '<div><label>企画</label><select name="project">'
+        + project_options(store, project, blank="すべて") + '</select></div>'
+        '<div><label>絞り込み</label><select name="missing">'
+        f'<option value="">すべて</option>'
+        f'<option value="1"{" selected" if missing_only else ""}>'
+        'ファイルが見つからないものだけ</option></select></div>'
+        '</div><div class="actions"><button type="submit">検索</button> '
+        '<a class="dim" href="/handoffs" style="margin-left:12px">条件をクリア</a>'
+        '</div></form>')
+    body += card("検索", search, wide=True)
+
+    rows = []
+    for handoff in results:
+        controls = (
+            f'<form method="post" action="/ui/handoff/update" class="row" '
+            f'style="gap:6px">'
+            f'<input type="hidden" name="id" value="{e(handoff["id"])}">'
+            f'<select name="project" style="flex:1 1 120px">'
+            + project_options(store, handoff["project_id"]) +
+            '</select>'
+            '<button class="sub" type="submit">企画を変更</button></form>'
+            f'<form method="post" action="/ui/handoff/delete" '
+            f'onsubmit="return confirm(\'一覧から外します。ファイル自体は消えません。'
+            f'よろしいですか？\')" style="margin-top:6px">'
+            f'<input type="hidden" name="id" value="{e(handoff["id"])}">'
+            '<button class="danger" type="submit">一覧から外す</button></form>')
+        rows.append([
+            f'<b>{e(handoff["title"])}</b>'
+            f'<div class="path">{e(handoff["file_path"])}</div>',
+            e(handoff["project_id"]),
+            e(handoff["phase"]) or '<span class="dim">-</span>',
+            file_flag(handoff["file_exists"]),
+            controls,
+        ])
+
+    listing = table(["ファイル", "企画", "工程", "実ファイル", "操作"], rows,
+                    "該当するハンドオフがありません。")
+    verify = ('<form method="post" action="/ui/verify" style="margin-bottom:14px">'
+              '<button class="sub" type="submit">'
+              'すべてのファイルの存在を確認する</button></form>')
+    body += '<div class="grid">' + card(f"結果 {len(results)} 件", verify + listing,
+                                        wide=True) + "</div>"
+    return page("ハンドオフ一覧", body, "/handoffs")
 
 
-def project_page(store: Store, project_id: str) -> str:
+# ================================================================ 取り込み
+
+def import_page(store: Store, result: dict[str, Any] | None = None,
+                form: dict[str, str] | None = None, message: str = "",
+                bad: bool = False) -> str:
+    form = form or {}
+    body = flash(message, bad)
+    body += '<h2 class="page">ハンドオフの取り込み</h2>'
+    body += ('<p class="lead">フォルダを指定すると、その中（サブフォルダ含む）から'
+             'ファイル名に「ハンドオフ」を含むファイルを自動で探して登録します。</p>')
+
+    body += ('<div class="note">ファイルは<b>移動もコピーも変更もしません</b>。'
+             '中身も開きません。記録するのは「どこに何があるか」だけです。<br>'
+             '同じファイルを二度取り込んでも重複しません。</div>')
+
+    fields = (
+        '<form method="post" action="/ui/import">'
+        '<label>探すフォルダ（このPC内のパス）</label>'
+        f'<input name="dir" required placeholder="例: D:\\projects"'
+        f' value="{e(form.get("dir", ""))}">'
+        '<div class="row">'
+        '<div><label>ファイル名に含まれる言葉（カンマ区切り）</label>'
+        f'<input name="keywords" value="'
+        f'{e(form.get("keywords", "ハンドオフ, handoff"))}"></div>'
+        '<div><label>登録先の企画</label><select name="project">'
+        + project_options(store, form.get("project", ""), blank="（新しく作る）") +
+        '</select></div>'
+        '<div><label>新しい企画の名前（上で「新しく作る」を選んだ場合）</label>'
+        f'<input name="new_project" placeholder="例: 未分類"'
+        f' value="{e(form.get("new_project", ""))}"></div>'
+        '</div>'
+        '<div class="actions"><button type="submit">この条件で取り込む</button></div>'
+        '</form>')
+    body += '<div class="grid">' + card("取り込み条件", fields, wide=True) + "</div>"
+
+    if result:
+        added, already = result["added"], result["already"]
+        summary = table(["項目", "結果"], [
+            ["新しく登録", f'<b class="ok">{len(added)} 件</b>'],
+            ["すでに登録済み", f"{len(already)} 件"],
+            ["調べたファイル数", f"{result['scanned']} 件"],
+            ["かかった時間", f"{result['seconds']} 秒"],
+        ])
+        if result.get("stopped"):
+            summary += ('<p class="warn">※ 件数が多いため途中で打ち切りました。'
+                        'フォルダをもう少し絞って再実行してください。</p>')
+        listing = table(
+            ["ファイル", "工程", "場所"],
+            [[e(h["title"]), e(h["phase"]) or '<span class="dim">-</span>',
+              f'<span class="path">{e(h["file_path"])}</span>'] for h in added],
+            "新しく登録されたものはありません（すべて登録済みでした）。")
+        body += ('<div class="grid">' + card("取り込み結果", summary)
+                 + card("登録したファイル", listing, wide=False) + "</div>"
+                 + '<p style="margin-top:16px">'
+                   '<a href="/handoffs">→ ハンドオフ一覧で確認する</a></p>')
+    return page("ハンドオフの取り込み", body, "/import")
+
+
+# ================================================================== 企画
+
+def projects_page(store: Store, message: str = "") -> str:
+    body = flash(message)
+    body += '<h2 class="page">企画</h2>'
+    body += '<p class="lead">企画ごとに、現在の工程・決定事項・ハンドオフをまとめます。</p>'
+
+    rows = []
+    for project in store.list_projects():
+        state = store.current_state(project["id"])
+        rows.append([
+            f'<a href="/project/{e(project["id"])}">{e(project["name"])}</a>',
+            status_badge(project["status"]),
+            e(state["phase"]) if state else '<span class="dim">未設定</span>',
+            f'{len(store.list_decisions(project["id"]))} 件',
+            f'{len(store.list_handoffs(project["id"]))} 件',
+        ])
+    body += '<div class="grid">'
+    body += card("企画一覧", table(["企画", "状態", "現在の工程", "決定事項",
+                                    "ハンドオフ"], rows), wide=True)
+    body += card("新しい企画を作る",
+                 '<form method="post" action="/ui/project">'
+                 '<label>企画の名前</label>'
+                 '<input name="name" required placeholder="例: SYNAPTIC GROVE">'
+                 '<label>ひとこと説明（任意）</label><input name="summary">'
+                 '<div class="actions"><button type="submit">作成</button></div>'
+                 '</form>', wide=True)
+    body += "</div>"
+    return page("企画", body, "/projects")
+
+
+def project_page(store: Store, project_id: str, message: str = "") -> str:
     data = store.project_overview(project_id)
     project, state = data["project"], data["state"]
-    head = (f"<h2 style=\"letter-spacing:.1em\">{e(project['name'])} "
-            f"{status_badge(project['status'])}</h2>"
-            f"<p class=\"dim\">{e(project['summary'])}</p>")
 
-    now_rows = [["CURRENT PHASE", e(state["phase"]) if state else "-"],
-                ["STATUS", status_badge(state["status"]) if state else "-"],
-                ["OWNER", e(state["owner"]) if state else "-"],
-                ["DEPENDENCIES", ", ".join(e(d) for d in data["dependencies"]) or "-"]]
+    body = flash(message)
+    body += f'<h2 class="page">{e(project["name"])} {status_badge(project["status"])}</h2>'
+    body += f'<p class="lead">{e(project["summary"])}</p>'
+
+    now_rows = [
+        ["現在の工程", e(state["phase"]) if state else '<span class="dim">未設定</span>'],
+        ["状態", status_badge(state["status"]) if state else "-"],
+        ["担当", e(state["owner"]) if state and state["owner"] else "-"],
+        ["前提となる工程", "、".join(e(d) for d in data["dependencies"]) or "-"],
+    ]
     deliverables = "".join(f"<li>{e(d)}</li>"
                            for d in (state["deliverables"] if state else []))
 
-    body = head + "<div class=\"grid\">"
-    body += card("CURRENT", table(["", ""], now_rows)
+    body += '<div class="grid">'
+    body += card("いまの状況", table(["", ""], now_rows)
                  + (f"<ul>{deliverables}</ul>" if deliverables else ""))
-    body += card("PHASES", table(
-        ["PHASE", "STATUS", "OWNER"],
+    body += card("工程の履歴", table(
+        ["工程", "状態", "担当"],
         [[e(p["phase"]), status_badge(p["status"]), e(p["owner"] or "-")]
-         for p in data["phases"]]))
-    body += card("DECISIONS", table(
-        ["ID", "TITLE", "STATUS"],
-        [[e(d["id"]), e(d["title"]) + (f"<br><span class=\"dim\">{e(d['body'])}</span>"
-                                       if d["body"] else ""),
-          status_badge(d["status"])] for d in data["decisions"]]))
-    body += card("FACTS", table(
-        ["FACT", "TAGS"],
-        [[e(f["body"]), " ".join(f"<span class=\"tag\">{e(t)}</span>"
+         for p in data["phases"]], "まだ登録がありません"))
+    body += card("決定事項", table(
+        ["内容", "状態"],
+        [[f'<b>{e(d["title"])}</b>'
+          + (f'<div class="dim">{e(d["body"])}</div>' if d["body"] else ""),
+          status_badge(d["status"])] for d in data["decisions"]]), wide=True)
+    body += card("事実・制約", table(
+        ["内容", "タグ"],
+        [[e(f["body"]), " ".join(f'<span class="tag">{e(t)}</span>'
                                  for t in f["tags"])] for f in data["facts"]]))
-    body += card("HANDOFFS", table(
-        ["ID", "TITLE", "PATH", "OWNER", "FILE"],
-        [[e(h["id"]), e(h["title"]), f"<code>{e(h['file_path'])}</code>",
-          e(h["owner"]),
-          "<span class=\"ok\">OK</span>" if h["file_exists"]
-          else "<span class=\"bad\">MISSING</span>"] for h in data["handoffs"]]))
-    body += card("RELATIONS", table(
-        ["SRC", "REL", "DST"],
-        [[e(r["src"]), f"<span class=\"dim\">{e(r['rel'])}</span>", e(r["dst"])]
-         for r in data["relations"]]))
-    body += card("RECENT CHANGES", table(
-        ["TIME", "ENTITY", "ACTION", "SUMMARY"],
-        [[e(c["created_at"][11:19]), e(c["entity"]), e(c["action"]), e(c["summary"])]
-         for c in data["changes"]]))
+    body += card("ハンドオフ", table(
+        ["ファイル", "実ファイル"],
+        [[f'{e(h["title"])}<div class="path">{e(h["file_path"])}</div>',
+          file_flag(h["file_exists"])] for h in data["handoffs"]]))
     body += "</div>"
 
-    body += "<div class=\"grid\" style=\"margin-top:16px\">"
-    body += card("ADD DECISION", _decision_form(project_id))
-    body += card("UPDATE STATE", _state_form(project_id))
-    body += card("INDEX HANDOFF", _handoff_form(project_id))
-    body += card("ADD RELATION", _relation_form(project_id))
-    body += card("ADD FACT", _fact_form(project_id))
+    body += '<div class="grid" style="margin-top:18px">'
+    body += card("決定事項を追加", _decision_form(project_id))
+    body += card("工程を更新", _state_form(project_id))
+    body += card("事実・制約を追加", _fact_form(project_id))
     body += "</div>"
 
-    body += "<div class=\"grid\" style=\"margin-top:16px\">" + card(
-        "CONTEXT PREVIEW",
-        "".join(f"<p><a href=\"/preview/context/{e(a['id'])}?project={e(project_id)}\">"
-                f"{e(a['name'])} → /context/{e(a['id'])}</a></p>"
-                for a in store.list_agents())) + "</div>"
-    return page(f"{project['name']} — SECOND BRAIN", body)
+    body += ('<div class="grid" style="margin-top:18px">' + card(
+        "AIへ渡すコンテキスト",
+        '<p class="dim">下のリンクを開いて、表示された文章をそのままAIチャットへ'
+        '貼り付けてください。役割ごとに中身が変わります。</p>'
+        + "".join(
+            f'<p><a href="/preview/context/{e(a["id"])}?project={e(project_id)}">'
+            f'{e(a["name"])} 用のコンテキストを見る</a></p>'
+            for a in store.list_agents()), wide=True) + "</div>")
+    return page(f"{project['name']} — 第二の脳", body)
 
 
 def _hidden(project_id: str) -> str:
-    return f"<input type=\"hidden\" name=\"project\" value=\"{e(project_id)}\">"
+    return f'<input type="hidden" name="project" value="{e(project_id)}">'
 
 
 def _decision_form(pid: str) -> str:
-    return ("<form method=\"post\" action=\"/api/decision\">" + _hidden(pid) +
-            "<label>title</label><input name=\"title\" required>"
-            "<label>body</label><textarea name=\"body\" rows=\"3\"></textarea>"
-            "<div class=\"row\"><div><label>status</label>"
-            "<select name=\"status\"><option>LOCKED</option><option>PROPOSED</option>"
-            "<option>SUPERSEDED</option></select></div>"
-            "<div><label>phase</label><input name=\"phase\"></div></div>"
-            "<p><button type=\"submit\">SAVE DECISION</button></p></form>")
+    return ('<form method="post" action="/api/decision">' + _hidden(pid) +
+            "<label>決まったこと</label><input name=\"title\" required "
+            'placeholder="例: CHANNELはパイプに見せない">'
+            '<label>補足（任意）</label><textarea name="body" rows="3"></textarea>'
+            '<div class="row"><div><label>状態</label>'
+            '<select name="status"><option value="LOCKED">確定</option>'
+            '<option value="PROPOSED">検討中</option>'
+            '<option value="SUPERSEDED">破棄</option></select></div>'
+            '<div><label>工程（任意）</label><input name="phase"></div></div>'
+            '<div class="actions"><button type="submit">保存</button></div></form>')
 
 
 def _state_form(pid: str) -> str:
-    return ("<form method=\"post\" action=\"/api/state\">" + _hidden(pid) +
-            "<label>phase</label><input name=\"phase\" required>"
-            "<div class=\"row\"><div><label>status</label>"
-            "<select name=\"status\"><option>IN_PROGRESS</option>"
-            "<option>COMPLETE</option><option>BLOCKED</option>"
-            "<option>WAITING</option></select></div>"
-            "<div><label>owner</label><input name=\"owner\"></div></div>"
-            "<label>deliverables (1行1件)</label>"
-            "<textarea name=\"deliverables\" rows=\"3\"></textarea>"
-            "<p><button type=\"submit\">SET STATE</button></p></form>")
-
-
-def _handoff_form(pid: str) -> str:
-    return ("<form method=\"post\" action=\"/api/handoff\">" + _hidden(pid) +
-            "<div class=\"row\"><div><label>id</label>"
-            "<input name=\"id\" required></div>"
-            "<div><label>phase</label><input name=\"phase\"></div></div>"
-            "<label>title</label><input name=\"title\">"
-            "<label>file_path</label><input name=\"file_path\" required "
-            "placeholder=\"D:\\projects\\...\\GR-02.md\">"
-            "<label>owner</label><input name=\"owner\">"
-            "<p><button type=\"submit\">INDEX</button></p></form>")
-
-
-def _relation_form(pid: str) -> str:
-    return ("<form method=\"post\" action=\"/api/relation\">" + _hidden(pid) +
-            "<div class=\"row\"><div><label>src</label><input name=\"src\" required>"
-            "</div><div><label>rel</label><input name=\"rel\" value=\"depends_on\" "
-            "required></div><div><label>dst</label><input name=\"dst\" required>"
-            "</div></div><p><button type=\"submit\">LINK</button></p></form>")
+    return ('<form method="post" action="/api/state">' + _hidden(pid) +
+            '<label>いまの工程</label><input name="phase" required '
+            'placeholder="例: GR-02 CHANNEL">'
+            '<div class="row"><div><label>状態</label>'
+            '<select name="status"><option value="IN_PROGRESS">作業中</option>'
+            '<option value="COMPLETE">完了</option>'
+            '<option value="BLOCKED">停止中</option>'
+            '<option value="WAITING">待ち</option></select></div>'
+            '<div><label>担当</label><input name="owner"></div></div>'
+            '<label>成果物（1行に1つ）</label>'
+            '<textarea name="deliverables" rows="3"></textarea>'
+            '<div class="actions"><button type="submit">更新</button></div></form>')
 
 
 def _fact_form(pid: str) -> str:
-    return ("<form method=\"post\" action=\"/api/fact\">" + _hidden(pid) +
-            "<label>body</label><input name=\"body\" required>"
-            "<label>tags (カンマ区切り)</label><input name=\"tags\" "
-            "placeholder=\"constraint, asset\">"
-            "<p><button type=\"submit\">ADD FACT</button></p></form>")
+    return ('<form method="post" action="/api/fact">' + _hidden(pid) +
+            '<label>事実・制約</label><input name="body" required '
+            'placeholder="例: アセット総数は21で固定">'
+            '<label>タグ（カンマ区切り・任意）</label>'
+            '<input name="tags" placeholder="constraint, asset, world">'
+            '<div class="actions"><button type="submit">追加</button></div></form>')
 
+
+# ================================================================ AI設定
 
 def agents_page(store: Store) -> str:
-    body = "<div class=\"grid\">"
+    body = '<h2 class="page">AI設定</h2>'
+    body += ('<p class="lead">同じ企画でも、AIごとに<b>見せる情報と評価軸を変えます</b>。'
+             '確定した事実は全員に共有し、考え方は共有しません。</p>')
+    body += '<div class="grid">'
     for profile in store.list_role_profiles():
         agents = [a for a in store.list_agents()
                   if a["context_profile"] == profile["id"]]
         rows = [
-            ["GOAL", e(profile["goal"])],
-            ["PRIORITY", e(profile["priority"])],
-            ["SEES", " ".join(f"<span class=\"tag\">{e(v)}</span>"
-                              for v in profile["visible_context"]) or "-"],
-            ["HIDDEN", " ".join(f"<span class=\"tag dim\">{e(v)}</span>"
-                                for v in profile["hidden_context"]) or "-"],
-            ["AXES", "、".join(e(v) for v in profile["evaluation_axes"]) or "-"],
-            ["PROHIBITED", "<span class=\"bad\">"
+            ["目的", e(profile["goal"])],
+            ["優先", e(profile["priority"])],
+            ["見せる情報", " ".join(f'<span class="tag">{e(v)}</span>'
+                                    for v in profile["visible_context"]) or "-"],
+            ["見せない情報", " ".join(f'<span class="tag dim">{e(v)}</span>'
+                                      for v in profile["hidden_context"]) or "-"],
+            ["評価軸", "、".join(e(v) for v in profile["evaluation_axes"]) or "-"],
+            ["禁止", '<span class="bad">'
              + "、".join(e(v) for v in profile["prohibitions"]) + "</span>"],
-            ["AGENTS", ", ".join(
-                f"<a href=\"/preview/context/{e(a['id'])}\">{e(a['name'])}</a>"
+            ["コンテキスト", ", ".join(
+                f'<a href="/preview/context/{e(a["id"])}">{e(a["name"])}</a>'
                 for a in agents) or "-"],
         ]
-        body += card(f"{profile['name']}  ({profile['id']})", table(["", ""], rows))
+        body += card(f'{profile["name"]}（{profile["id"]}）', table(["", ""], rows))
     body += "</div>"
-    body += "<div class=\"grid\" style=\"margin-top:16px\">" + card(
-        "REGISTER AGENT",
-        "<form method=\"post\" action=\"/api/agent\"><div class=\"row\">"
-        "<div><label>id</label><input name=\"id\" required></div>"
-        "<div><label>name</label><input name=\"name\"></div>"
-        "<div><label>role</label><input name=\"role\"></div>"
-        "<div><label>context_profile</label><select name=\"context_profile\">"
-        + "".join(f"<option>{e(p['id'])}</option>" for p in store.list_role_profiles())
-        + "</select></div></div><p><button type=\"submit\">SAVE</button></p></form>"
-    ) + "</div>"
-    return page("AI AGENTS — SECOND BRAIN", body)
+    return page("AI設定", body, "/agents")
 
 
 def context_page(store: Store, result: dict[str, Any]) -> str:
     tokens = result["token_estimate"]
     cls = "ok" if tokens <= result["token_budget"] else "bad"
-    dropped = ", ".join(result["dropped_sections"]) or "なし"
-    body = (f"<h2>{e(result['role_name'])} — {e(result['project'])}</h2>"
-            f"<p class=\"dim\">GET <code>/context/{e(result['role'])}"
-            f"?project={e(result['project'])}</code> · "
-            f"<span class=\"{cls}\">≈{tokens} tokens</span> / budget "
-            f"{e(result['token_budget'])} · dropped: {e(dropped)}</p>"
-            f"<pre>{e(result['text'])}</pre>")
-    return page(f"context/{result['role']}", body)
+    body = f'<h2 class="page">{e(result["role_name"])} 用のコンテキスト</h2>'
+    body += (f'<p class="lead">企画: {e(result["project"])} ／ '
+             f'<span class="{cls}">約 {tokens} トークン</span>'
+             f'（上限 {e(result["token_budget"])}）</p>')
+    body += ('<div class="note">この枠の中身をコピーして、AIチャットの最初に'
+             '貼り付けてください。役割が違えば中身も変わります。</div>')
+    body += (f'<pre style="background:#0b0f14;border:1px solid var(--line);'
+             f'border-radius:8px;padding:16px;white-space:pre-wrap;'
+             f'word-break:break-word">{e(result["text"])}</pre>')
+    return page(f"コンテキスト（{result['role']}）", body)
 
 
 def login_page(failed: bool) -> str:
-    warn = "<p class=\"bad\">APIキーが違います。</p>" if failed else ""
-    body = ("<div class=\"grid\">" + card(
-        "LOGIN", warn + "<form method=\"get\" action=\"/login\">"
-        "<label>API KEY</label><input name=\"key\" type=\"password\" required>"
-        "<p><button type=\"submit\">ENTER</button></p></form>") + "</div>")
-    return page("LOGIN — SECOND BRAIN", body)
+    warn = '<p class="bad">APIキーが違います。</p>' if failed else ""
+    body = '<div class="grid">' + card(
+        "ログイン", warn + '<form method="get" action="/login">'
+        '<label>APIキー</label><input name="key" type="password" required>'
+        '<div class="actions"><button type="submit">入る</button></div></form>'
+    ) + "</div>"
+    return page("ログイン", body)
 
 
 def error_page(status: int, message: str) -> str:
-    return page(f"{status}", "<div class=\"grid\">"
-                + card(str(status), f"<p class=\"bad\">{escape(message)}</p>"
-                       "<p><a href=\"/\">← dashboard</a></p>") + "</div>")
+    return page(str(status), '<div class="grid">' + card(
+        f"エラー {status}", f'<p class="bad">{escape(message)}</p>'
+        '<p><a href="/">← ダッシュボードに戻る</a></p>') + "</div>")

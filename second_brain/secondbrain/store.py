@@ -67,18 +67,34 @@ def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
     return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
 
-SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+#: ids travel in URLs and are percent-encoded there, so Japanese is fine —
+#: what must never appear is a path separator, whitespace or a control char.
+BAD_ID_CHARS = set('/\\?#%&<>"\'`|*:;,\t\n\r ')
+MAX_ID_LENGTH = 64
 
 
 def check_id(value: str, label: str) -> str:
     value = (value or "").strip()
     if not value:
-        raise Invalid(f"{label} is required")
-    if not SLUG_RE.match(value):
-        raise Invalid(
-            f"{label} must be letters, digits, '-', '_' or '.' (got {value!r})"
-        )
+        raise Invalid(f"{label}を入力してください")
+    if len(value) > MAX_ID_LENGTH:
+        raise Invalid(f"{label}が長すぎます（{MAX_ID_LENGTH}文字まで）")
+    if value.startswith(".") or ".." in value:
+        raise Invalid(f"{label}に '.' で始まる値や '..' は使えません")
+    bad = sorted(BAD_ID_CHARS & set(value))
+    if bad:
+        raise Invalid(f"{label}に使えない文字が含まれています: {' '.join(bad)}")
+    if any(ord(ch) < 32 for ch in value):
+        raise Invalid(f"{label}に制御文字は使えません")
     return value
+
+
+def slugify_id(name: str) -> str:
+    """名前からIDを作る。日本語はそのまま残し、使えない文字だけ '-' に。"""
+    cleaned = "".join("-" if ch in BAD_ID_CHARS or ord(ch) < 32 else ch
+                      for ch in (name or "").strip())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-.")
+    return cleaned[:MAX_ID_LENGTH] or "project"
 
 
 class Store:
@@ -406,6 +422,84 @@ class Store:
                 if not exists:
                     missing.append(handoff["id"])
         return {"checked": checked, "missing": missing, "checked_at": ts}
+
+    def get_handoff_by_path(self, file_path: str) -> dict[str, Any] | None:
+        """Look a handoff up by the file it points at (re-scans must not
+        create a second entry for the same file)."""
+        return row_to_dict(self.conn.execute(
+            "SELECT * FROM handoffs WHERE file_path = ?", (file_path,)).fetchone())
+
+    def next_handoff_id(self) -> str:
+        """Auto id for imported files, whose names are rarely valid ids."""
+        row = self.conn.execute(
+            "SELECT id FROM handoffs WHERE id LIKE 'HO-%' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        seq = 0
+        if row:
+            match = re.search(r"(\d+)$", row["id"])
+            if match:
+                seq = int(match.group(1))
+        return f"HO-{seq + 1:04d}"
+
+    def search_handoffs(self, query: str = "", project: str | None = None,
+                        status: str | None = None, missing_only: bool = False,
+                        limit: int = 500) -> list[dict[str, Any]]:
+        """Free-text search over the index (title, path, phase, owner, id)."""
+        sql = "SELECT * FROM handoffs WHERE 1=1"
+        args: list[Any] = []
+        for term in [t for t in (query or "").split() if t]:
+            sql += (" AND (title LIKE ? OR file_path LIKE ? OR phase LIKE ?"
+                    " OR owner LIKE ? OR id LIKE ?)")
+            args += [f"%{term}%"] * 5
+        if project:
+            sql += " AND project_id = ?"
+            args.append(project)
+        if status:
+            sql += " AND status = ?"
+            args.append(status)
+        if missing_only:
+            sql += " AND file_exists = 0"
+        sql += " ORDER BY project_id, phase, id LIMIT ?"
+        args.append(limit)
+        return rows_to_dicts(self.conn.execute(sql, args))
+
+    def update_handoff(self, id: str, project_id: str | None = None,
+                       status: str | None = None, owner: str | None = None,
+                       phase: str | None = None, title: str | None = None,
+                       actor: str = "") -> dict[str, Any]:
+        """Re-file an indexed handoff. Never touches the file itself."""
+        handoff = self.get_handoff(id)
+        if handoff is None:
+            raise NotFound(f"unknown handoff: {id}")
+        if project_id:
+            self.require_project(project_id)
+        fields = {"project_id": project_id, "status": status, "owner": owner,
+                  "phase": phase, "title": title}
+        changes = {k: v for k, v in fields.items() if v is not None and v != ""}
+        if not changes:
+            return handoff
+        assignments = ", ".join(f"{k} = ?" for k in changes)
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE handoffs SET {assignments}, updated_at = ? WHERE id = ?",
+                [*changes.values(), now(), id])
+            self.log_change("handoff", id, "updated",
+                            ", ".join(f"{k}={v}" for k, v in changes.items()),
+                            project_id=changes.get("project_id",
+                                                   handoff["project_id"]),
+                            actor=actor)
+        return self.get_handoff(id)  # type: ignore[return-value]
+
+    def delete_handoff(self, id: str, actor: str = "") -> dict[str, Any]:
+        """Remove an entry from the index. The file on disk is left alone."""
+        handoff = self.get_handoff(id)
+        if handoff is None:
+            raise NotFound(f"unknown handoff: {id}")
+        with self.conn:
+            self.conn.execute("DELETE FROM handoffs WHERE id = ?", (id,))
+            self.log_change("handoff", id, "removed", handoff["file_path"],
+                            project_id=handoff["project_id"], actor=actor)
+        return handoff
 
     # -------------------------------------------------------------- relations
 

@@ -10,6 +10,7 @@ import ipaddress
 import socket
 import sys
 import threading
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .app import App
@@ -85,7 +86,7 @@ def build_server(app: App, config: Config) -> ThreadingHTTPServer:
     return server
 
 
-def serve(app: App, config: Config) -> None:
+def serve(app: App, config: Config, open_browser: bool = False) -> None:
     if not config.is_loopback and not config.api_key:
         raise SystemExit(
             "refusing to bind %s without an API key.\n"
@@ -98,6 +99,10 @@ def serve(app: App, config: Config) -> None:
     for ip in local_ips():
         print(f"  lan     http://{ip}:{port}")
     print("  auth    " + ("API key required" if config.api_key else "off (loopback)"))
+    if open_browser:
+        # サーバーが listen し始めてから開く（起動直後だと接続拒否になる）。
+        threading.Timer(1.0, webbrowser.open,
+                        [f"http://127.0.0.1:{port}"]).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

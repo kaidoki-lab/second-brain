@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import re
 from typing import Any, Callable
+from urllib.parse import quote, unquote
 
 from . import ui
 from .auth import check as auth_check, cookie_for
 from .config import Config
 from .context import ContextRouter
 from .http_util import HttpError, Request, Response
-from .store import Invalid, NotFound, Store
+from .scan import DEFAULT_KEYWORDS, import_handoffs
+from .store import Invalid, NotFound, Store, slugify_id
 
 Handler = Callable[["App", Request, dict[str, str]], Response]
 
@@ -48,10 +50,12 @@ class App:
                 continue
             if method != request.method:
                 continue
+            # Japanese ids arrive percent-encoded from the browser.
+            params = {k: unquote(v) for k, v in match.groupdict().items()}
             try:
                 if not public:
                     auth_check(request, self.config.api_key)
-                return handler(self, request, match.groupdict())
+                return handler(self, request, params)
             except HttpError as exc:
                 return self._error(request, exc.status, exc.message)
             except NotFound as exc:
@@ -348,17 +352,110 @@ def post_verify(app: App, request: Request, _: dict[str, str]) -> Response:
 
 @route("GET", "/")
 def ui_home(app: App, request: Request, _: dict[str, str]) -> Response:
-    return Response.html(ui.dashboard(app.store))
+    return Response.html(ui.dashboard(app.store, request.q("msg", "") or ""))
 
 
 @route("GET", "/project/{id}")
 def ui_project(app: App, request: Request, params: dict[str, str]) -> Response:
-    return Response.html(ui.project_page(app.store, params["id"]))
+    return Response.html(ui.project_page(app.store, params["id"],
+                                         request.q("msg", "") or ""))
+
+
+@route("GET", "/projects")
+def ui_projects(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.html(ui.projects_page(app.store, request.q("msg", "") or ""))
 
 
 @route("GET", "/agents")
 def ui_agents(app: App, request: Request, _: dict[str, str]) -> Response:
     return Response.html(ui.agents_page(app.store))
+
+
+@route("GET", "/handoffs")
+def ui_handoffs(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.html(ui.handoff_list(
+        app.store, request.q("q", "") or "", request.q("project", "") or "",
+        request.q("missing") == "1", request.q("msg", "") or ""))
+
+
+@route("GET", "/import")
+def ui_import(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.html(ui.import_page(app.store))
+
+
+@route("POST", "/ui/import")
+def ui_do_import(app: App, request: Request, _: dict[str, str]) -> Response:
+    """フォルダを走査してハンドオフを取り込む（本文は読まない）。"""
+    form = request.payload()
+    directory = str(form.get("dir", "")).strip()
+    if not directory:
+        return Response.html(ui.import_page(
+            app.store, None, form, "フォルダを入力してください", bad=True))
+
+    project_id = str(form.get("project", "")).strip()
+    if not project_id:
+        name = str(form.get("new_project", "")).strip() or "未分類"
+        project_id = slugify_id(name)
+        app.store.upsert_project(project_id, name, actor="ui")
+
+    raw = str(form.get("keywords", "")).strip()
+    keywords = tuple(k.strip() for k in raw.replace("、", ",").split(",")
+                     if k.strip()) or DEFAULT_KEYWORDS
+
+    result = import_handoffs(app.store, project_id, directory, keywords,
+                             recursive=True, actor="ui")
+    if result.get("error"):
+        return Response.html(ui.import_page(app.store, None, form,
+                                            result["error"], bad=True))
+    message = (f"{len(result['added'])} 件を新しく登録しました"
+               f"（登録済み {len(result['already'])} 件、"
+               f"調べたファイル {result['scanned']} 件）")
+    return Response.html(ui.import_page(app.store, result, form, message))
+
+
+@route("POST", "/ui/handoff/update")
+def ui_update_handoff(app: App, request: Request, _: dict[str, str]) -> Response:
+    form = request.payload()
+    handoff = app.store.update_handoff(
+        str(form.get("id", "")), project_id=str(form.get("project", "")) or None,
+        status=str(form.get("status", "")) or None,
+        owner=str(form.get("owner", "")) or None,
+        phase=str(form.get("phase", "")) or None, actor="ui")
+    return Response.redirect(
+        "/handoffs?msg=" + quote(f"{handoff['title']} の企画を変更しました"))
+
+
+@route("POST", "/ui/handoff/delete")
+def ui_delete_handoff(app: App, request: Request, _: dict[str, str]) -> Response:
+    """索引から外すだけ。ディスク上のファイルには触れない。"""
+    form = request.payload()
+    handoff = app.store.delete_handoff(str(form.get("id", "")), actor="ui")
+    return Response.redirect("/handoffs?msg=" + quote(
+        f"{handoff['title']} を一覧から外しました（ファイルは残っています）"))
+
+
+@route("POST", "/ui/verify")
+def ui_verify(app: App, request: Request, _: dict[str, str]) -> Response:
+    result = app.store.verify_handoffs()
+    missing = len(result["missing"])
+    message = (f"{result['checked']} 件を確認しました。"
+               + (f"うち {missing} 件のファイルが見つかりません。" if missing
+                  else "すべてのファイルが存在します。"))
+    return Response.redirect("/handoffs?msg=" + quote(message)
+                             + ("&missing=1" if missing else ""))
+
+
+@route("POST", "/ui/project")
+def ui_create_project(app: App, request: Request, _: dict[str, str]) -> Response:
+    form = request.payload()
+    name = str(form.get("name", "")).strip()
+    if not name:
+        raise HttpError(400, "企画の名前を入力してください")
+    project = app.store.upsert_project(slugify_id(name), name,
+                                       summary=str(form.get("summary", "")),
+                                       actor="ui")
+    return Response.redirect(f"/project/{quote(project['id'])}?msg="
+                             + quote("企画を作成しました"))
 
 
 @route("GET", "/preview/context/{role}")

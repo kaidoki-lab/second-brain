@@ -120,13 +120,26 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status, 303)
         self.assertEqual(response.headers["Location"], "/project/synaptic_grove")
 
-    def test_ui_pages_render(self):
-        for target in ("/", "/agents", "/project/synaptic_grove",
-                       "/preview/context/design"):
+    def test_ui_pages_render_in_japanese(self):
+        for target in ("/", "/agents", "/projects", "/handoffs", "/import",
+                       "/project/synaptic_grove", "/preview/context/design"):
             with self.subTest(target=target):
                 response = get(self.app, target)
                 self.assertEqual(response.status, 200)
-                self.assertIn("SECOND BRAIN", response.body.decode())
+                body = response.body.decode()
+                self.assertIn("第二の脳", body)
+                self.assertIn('lang="ja"', body)
+
+    def test_ui_has_no_leftover_english_headings(self):
+        body = get(self.app, "/").body.decode()
+        for english in ("PROJECTS", "RECENT CHANGES", "DASHBOARD"):
+            self.assertNotIn(english, body)
+
+    def test_import_page_offers_the_folder_form(self):
+        body = get(self.app, "/import").body.decode()
+        self.assertIn("探すフォルダ", body)
+        self.assertIn("ハンドオフ", body)
+        self.assertIn("移動もコピーも変更もしません", body)
 
     def test_html_clients_get_an_html_error(self):
         response = get(self.app, "/project/ghost", accept="text/html")
