@@ -3,6 +3,12 @@
 # データベース（~/.second_brain/brain.db）と config.json は触らない。
 
 $ErrorActionPreference = 'Stop'
+
+# cmd 側の chcp と二重にならないよう、ここで出力を UTF-8 に固定する
+# （指定しないと全角文字が二重に表示されることがある）
+try {
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8
+} catch { }
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $zipUrl = 'https://github.com/kaidoki-lab/second-brain/archive/refs/heads/main.zip'
 $work = Join-Path $env:TEMP ('sb_update_' + [Guid]::NewGuid().ToString('N'))
