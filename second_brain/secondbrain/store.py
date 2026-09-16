@@ -244,6 +244,12 @@ class Store:
         self.require_project(project_id)
         if not (body or "").strip():
             raise Invalid("fact body is required")
+        # 同じ事実を二度書かない（同じファイルを二度取り込んでも増えない）。
+        existing = self.conn.execute(
+            "SELECT * FROM facts WHERE project_id = ? AND body = ?",
+            (project_id, body.strip())).fetchone()
+        if existing is not None:
+            return row_to_dict(existing)  # type: ignore[return-value]
         with self.conn:
             cur = self.conn.execute(
                 "INSERT INTO facts(project_id, key, body, tags, source, created_at)"
@@ -283,7 +289,15 @@ class Store:
         self.require_project(project_id)
         if not (title or "").strip():
             raise Invalid("decision title is required")
-        decision_id = check_id(id, "decision id") if id else self.next_decision_id()
+        if id:
+            decision_id = check_id(id, "decision id")
+        else:
+            # 同じ企画で同じ決定が既にあれば、新しい番号を振らずそこへ上書きする。
+            # （同じ文章を二度取り込んでも決定事項が増殖しない）
+            same = self.conn.execute(
+                "SELECT id FROM decisions WHERE project_id = ? AND title = ?",
+                (project_id, title.strip())).fetchone()
+            decision_id = same["id"] if same else self.next_decision_id()
         ts = now()
         with self.conn:
             existed = self.get_decision(decision_id) is not None
@@ -325,6 +339,12 @@ class Store:
         self.require_project(project_id)
         if not (phase or "").strip():
             raise Invalid("phase is required")
+        # 直前とまったく同じ内容なら履歴を増やさない（再取り込み対策）。
+        latest = self.current_state(project_id)
+        if latest and (latest["phase"], latest["status"], latest["owner"],
+                       latest["deliverables"]) == (
+                phase.strip(), status, owner, loads(_json_list(deliverables))):
+            return latest
         with self.conn:
             self.conn.execute(
                 "INSERT INTO states(project_id, phase, status, owner, note,"

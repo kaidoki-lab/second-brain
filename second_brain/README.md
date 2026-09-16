@@ -61,6 +61,7 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | `context <role> [--project] [--budget]` | 役割別コンテキストを標準出力へ |
 | `index --project P --dir DIR [--pattern *.md] [--recursive]` | 既存ハンドオフを索引（本文は読まない） |
 | `scan --project P --dir DIR [--keywords ハンドオフ,handoff]` | 名前で自動検出して一括登録 |
+| `load --file PATH [--fallback 企画名]` | テキストファイルから企画・私についてを投入 |
 | `verify [--project P]` | 索引したファイルの存在確認 |
 | `export [--out brain.md]` | brain.md を書き出す |
 | `key` | APIキー生成 |
@@ -80,6 +81,19 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | `/profile` | **私について**（全AI共通の前提）の取り込みと管理 |
 | `/agents` | AIごとの「見せる情報／見せない情報／評価軸／禁止事項」 |
 | `/preview/context/{role}` | そのAIへ実際に渡る文章とトークン数（コピーして貼るだけ） |
+
+### ファイルから一括投入（貼り付け不要）
+
+テキストファイルを `import.bat` にドラッグ＆ドロップするか、`input.txt` として
+同じフォルダに置いてダブルクリックすると、そのまま取り込む。
+
+```bash
+python run.py load --file input.txt [--fallback 未分類]
+```
+
+`PROFILE:` 行は「私について」、`PROJECT:` 以下は企画データとして登録される。
+**同じファイルを何度取り込んでもデータは増えない**（決定事項は同じ見出しなら上書き、
+事実と工程は同じ内容ならそのまま）。
 
 ### まとめて取り込み（複数企画を一度に）
 

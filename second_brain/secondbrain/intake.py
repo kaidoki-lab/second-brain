@@ -152,8 +152,14 @@ def apply_result(store: Store, project_id: str, parsed: dict[str, Any],
     store.require_project(project_id)
     written = {"phases": 0, "decisions": 0, "facts": 0, "depends": 0, "opens": 0}
 
+    # 同じ内容の工程は書き直さない（同じ文章を二度取り込んでも履歴が汚れない）。
+    known = {p["phase"]: p for p in store.phase_summary(project_id)}
     for phase in parsed["phases"]:
         if not phase["phase"]:
+            continue
+        seen = known.get(phase["phase"])
+        if seen and (seen["status"], seen["owner"], seen["deliverables"]) == (
+                phase["status"], phase["owner"], phase["deliverables"]):
             continue
         store.set_state(project_id, phase["phase"], phase["status"],
                         phase["owner"], deliverables=phase["deliverables"],
@@ -162,10 +168,12 @@ def apply_result(store: Store, project_id: str, parsed: dict[str, Any],
 
     # append-only なので、最後にもう一度書いた工程が「現在地」になる。
     current = current_phase_of(parsed["phases"])
-    if current and written["phases"] > 1:
-        store.set_state(project_id, current["phase"], current["status"],
-                        current["owner"], deliverables=current["deliverables"],
-                        actor=actor)
+    if current:
+        live = store.current_state(project_id)
+        if not live or live["phase"] != current["phase"]:
+            store.set_state(project_id, current["phase"], current["status"],
+                            current["owner"],
+                            deliverables=current["deliverables"], actor=actor)
 
     for decision in parsed["decisions"]:
         if decision["title"]:
@@ -199,6 +207,10 @@ def apply_result(store: Store, project_id: str, parsed: dict[str, Any],
 PROJECT_RE = re.compile(
     r"^\s*(?:[-*・]|\d+[.)])?\s*(?:PROJECT|PROJ|企画)\s*[:：]\s*(.+)$", re.IGNORECASE)
 
+#: `PROFILE: 内容 | 分類` は企画に属さない「私について」。どこに書いてもよい。
+PROFILE_RE = re.compile(
+    r"^\s*(?:[-*・]|\d+[.)])?\s*(?:PROFILE|ME|私)\s*[:：]\s*(.+)$", re.IGNORECASE)
+
 
 def parse_bulk(text: str) -> dict[str, Any]:
     """PROJECT行で区切られた文章を、企画ごとの取り込み内容に分解する。
@@ -208,9 +220,20 @@ def parse_bulk(text: str) -> dict[str, Any]:
     """
     sections: list[dict[str, Any]] = []
     lead: list[str] = []
+    profile: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
     for raw in (text or "").splitlines():
+        me = PROFILE_RE.match(raw.strip())
+        if me:
+            fields = _split(me.group(1))
+            body = fields[0].strip()
+            if body:
+                profile.append({"body": body,
+                                "category": fields[1].strip()
+                                if len(fields) > 1 else "",
+                                "tags": []})
+            continue
         match = PROJECT_RE.match(raw.strip())
         if match:
             fields = _split(match.group(1))
@@ -234,7 +257,7 @@ def parse_bulk(text: str) -> dict[str, Any]:
                          "total": _count(parsed)})
     unassigned = parse_result("\n".join(lead))
     return {"projects": projects, "unassigned": unassigned,
-            "unassigned_total": _count(unassigned)}
+            "unassigned_total": _count(unassigned), "profile": profile}
 
 
 def _count(parsed: dict[str, Any]) -> int:
@@ -246,6 +269,12 @@ def apply_bulk(store: Store, bulk: dict[str, Any], actor: str = "bulk",
                unassigned_project: str = "") -> dict[str, Any]:
     """企画ごとに登録する。無い企画はここで作る。"""
     from .store import slugify_id
+
+    profile_written = 0
+    for item in bulk.get("profile", []):
+        store.add_profile(item["body"], category=item.get("category", ""),
+                          tags=item.get("tags"), source="bulk", actor=actor)
+        profile_written += 1
 
     results = []
     for entry in bulk["projects"]:
@@ -262,5 +291,6 @@ def apply_bulk(store: Store, bulk: dict[str, Any], actor: str = "bulk",
         written = apply_result(store, project_id, bulk["unassigned"], actor=actor)
         results.append({"project": project_id, "name": unassigned_project,
                         "written": written})
-    return {"projects": results,
-            "total": sum(sum(r["written"].values()) for r in results)}
+    return {"projects": results, "profile": profile_written,
+            "total": sum(sum(r["written"].values()) for r in results)
+            + profile_written}

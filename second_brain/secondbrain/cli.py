@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="ファイル名に含まれる語（カンマ区切り）")
     scan.add_argument("--owner", default="")
 
+    load = sub.add_parser("load", help="テキストファイルから企画・私についてを一括投入")
+    load.add_argument("--file", required=True)
+    load.add_argument("--fallback", default="",
+                      help="PROJECT行の前に書かれた分の行き先（省略時は取り込まない）")
+
     index = sub.add_parser("index", help="既存ハンドオフを索引に登録（本文は読まない）")
     index.add_argument("--project", required=True)
     index.add_argument("--dir", required=True)
@@ -134,6 +139,37 @@ def main(argv: list[str] | None = None) -> int:
         print(result["text"])
         print(f"\n--- ≈{result['token_estimate']} tokens "
               f"(budget {result['token_budget']})", file=sys.stderr)
+        return 0
+
+    if args.command == "load":
+        from .intake import apply_bulk, parse_bulk
+        path = Path(args.file).expanduser()
+        if not path.is_file():
+            print(f"ファイルが見つかりません: {path}")
+            return 1
+        raw = path.read_bytes()
+        for encoding in ("utf-8-sig", "utf-8", "cp932"):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = raw.decode("utf-8", "replace")
+
+        bulk = parse_bulk(text)
+        result = apply_bulk(store, bulk, actor="load",
+                            unassigned_project=args.fallback)
+        print(f"取り込みました: {path.name}")
+        if result["profile"]:
+            print(f"  私について  {result['profile']} 件")
+        for entry in result["projects"]:
+            counts = "、".join(f"{k} {v}" for k, v in entry["written"].items() if v)
+            print(f"  {entry['name']}  {counts or '（変更なし）'}")
+        print(f"合計 {result['total']} 件")
+        unknown = sum(len(p["parsed"]["unknown"]) for p in bulk["projects"])
+        if unknown:
+            print(f"※ 読み取れなかった行が {unknown} 行あります")
         return 0
 
     if args.command == "scan":
