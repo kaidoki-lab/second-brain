@@ -78,6 +78,7 @@ NAV = [
     ("/", "ダッシュボード"),
     ("/handoffs", "ハンドオフ"),
     ("/import", "取り込み"),
+    ("/bulk", "まとめて取り込み"),
     ("/projects", "企画"),
     ("/profile", "私について"),
     ("/agents", "AI設定"),
@@ -453,6 +454,87 @@ def _fact_form(pid: str) -> str:
             '<label>タグ（カンマ区切り・任意）</label>'
             '<input name="tags" placeholder="constraint, asset, world">'
             '<div class="actions"><button type="submit">追加</button></div></form>')
+
+
+# ========================================================== まとめて取り込み
+
+BULK_SAMPLE = """PROJECT: 企画の名前 | ACTIVE | ひとこと説明
+PHASE: 工程名 | 作業中 | 担当 | 成果物をセミコロン区切り
+DECISION: 決まったこと | 補足
+FACT: 前提や制約 | タグ
+DEPENDS: 後の工程 -> 先に必要な工程
+OPEN: まだ決まっていないこと
+
+PROJECT: 次の企画
+FACT: ..."""
+
+
+def _bulk_summary(bulk: dict[str, Any]) -> str:
+    rows = []
+    for entry in bulk["projects"]:
+        parsed = entry["parsed"]
+        rows.append([
+            f'<b>{e(entry["name"])}</b>',
+            f'{len(parsed["phases"])} 件', f'{len(parsed["decisions"])} 件',
+            f'{len(parsed["facts"])} 件', f'{len(parsed["opens"])} 件',
+        ])
+    if bulk["unassigned_total"]:
+        parsed = bulk["unassigned"]
+        rows.append([
+            '<span class="warn">企画の指定なし</span>',
+            f'{len(parsed["phases"])} 件', f'{len(parsed["decisions"])} 件',
+            f'{len(parsed["facts"])} 件', f'{len(parsed["opens"])} 件',
+        ])
+    return table(["企画", "工程", "決定事項", "事実", "未決"], rows,
+                 "読み取れる行がありませんでした。")
+
+
+def bulk_page(store: Store, text: str = "", bulk: dict[str, Any] | None = None,
+              result: dict[str, Any] | None = None, message: str = "") -> str:
+    """複数企画のメモを1回の貼り付けで登録する画面。"""
+    body = flash(message)
+    body += '<h2 class="page">まとめて取り込み</h2>'
+    body += ('<p class="lead">複数の企画をまたぐメモを、1回の貼り付けで企画ごとに'
+             '振り分けて登録します。</p>')
+    body += ('<div class="note"><code>PROJECT:</code> の行が出るたびに、'
+             'そこから下は新しい企画として扱います。書式:<br>'
+             f'<pre style="margin:8px 0 0;background:#0b0f14;padding:10px;'
+             f'border-radius:6px">{e(BULK_SAMPLE)}</pre>'
+             '説明文が混ざっていても、読める行だけ拾います。</div>')
+
+    body += '<div class="grid">' + card("貼り付ける",
+        '<form method="post" action="/ui/bulk">'
+        f'<textarea name="text" rows="16" placeholder="ここに貼り付け">{e(text)}</textarea>'
+        '<label>企画の指定がない行の行き先（任意）</label>'
+        '<input name="fallback" placeholder="例: 未分類">'
+        '<div class="actions"><button type="submit" name="action" value="preview">'
+        '内容を確認する</button></div></form>', wide=True) + "</div>"
+
+    if bulk:
+        body += ('<div class="grid" style="margin-top:18px">'
+                 + card("読み取った内容", _bulk_summary(bulk), wide=True) + "</div>")
+        total = sum(p["total"] for p in bulk["projects"]) + bulk["unassigned_total"]
+        if total:
+            body += ('<div class="grid" style="margin-top:18px">' + card(
+                "保存",
+                f'<p>{len(bulk["projects"])} 企画 / 合計 {total} 件を保存します。'
+                '企画が存在しなければ新しく作ります。</p>'
+                '<form method="post" action="/ui/bulk">'
+                f'<input type="hidden" name="text" value="{e(text)}">'
+                '<label>企画の指定がない行の行き先（空なら取り込まない）</label>'
+                '<input name="fallback" placeholder="例: 未分類">'
+                '<div class="actions">'
+                '<button type="submit" name="action" value="apply">'
+                'この内容で保存する</button></div></form>', wide=True) + "</div>")
+
+    if result:
+        rows = [[f'<a href="/project/{e(r["project"])}">{e(r["name"])}</a>',
+                 "、".join(f'{k} {v}' for k, v in r["written"].items() if v) or "-"]
+                for r in result["projects"]]
+        body += ('<div class="grid" style="margin-top:18px">'
+                 + card(f'保存しました（合計 {result["total"]} 件）',
+                        table(["企画", "内訳"], rows), wide=True) + "</div>")
+    return page("まとめて取り込み", body, "/bulk")
 
 
 # ============================================================== 私について

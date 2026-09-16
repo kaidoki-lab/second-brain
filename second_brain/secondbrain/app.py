@@ -17,7 +17,8 @@ from .config import Config
 from .context import ContextRouter
 from .http_util import HttpError, Request, Response
 from .bundle import build_bundle
-from .intake import apply_result, parse_memory, parse_result
+from .intake import (apply_bulk, apply_result, parse_bulk, parse_memory,
+                     parse_result)
 from .scan import DEFAULT_KEYWORDS, import_handoffs
 from .store import Invalid, NotFound, Store, slugify_id
 
@@ -398,6 +399,26 @@ def ui_do_intake(app: App, request: Request, params: dict[str, str]) -> Response
 @route("GET", "/projects")
 def ui_projects(app: App, request: Request, _: dict[str, str]) -> Response:
     return Response.html(ui.projects_page(app.store, request.q("msg", "") or ""))
+
+
+@route("GET", "/bulk")
+def ui_bulk(app: App, request: Request, _: dict[str, str]) -> Response:
+    return Response.html(ui.bulk_page(app.store))
+
+
+@route("POST", "/ui/bulk")
+def ui_do_bulk(app: App, request: Request, _: dict[str, str]) -> Response:
+    """複数企画のメモを一度に取り込む（確認 → 保存）。"""
+    form = request.payload()
+    text = str(form.get("text", ""))
+    fallback = str(form.get("fallback", "")).strip()
+    bulk = parse_bulk(text)
+    if form.get("action") == "apply":
+        result = apply_bulk(app.store, bulk, actor="ui",
+                            unassigned_project=fallback)
+        return Response.html(ui.bulk_page(app.store, "", None, result,
+                                          f"{result['total']} 件を保存しました"))
+    return Response.html(ui.bulk_page(app.store, text, bulk))
 
 
 @route("GET", "/profile")

@@ -191,3 +191,76 @@ def apply_result(store: Store, project_id: str, parsed: dict[str, Any],
             written["opens"] += 1
 
     return written
+
+
+# ====================================================== 複数企画を一度に取り込む
+
+#: `PROJECT: 名前 | 状態` で企画の切り替わりを表す。
+PROJECT_RE = re.compile(
+    r"^\s*(?:[-*・]|\d+[.)])?\s*(?:PROJECT|PROJ|企画)\s*[:：]\s*(.+)$", re.IGNORECASE)
+
+
+def parse_bulk(text: str) -> dict[str, Any]:
+    """PROJECT行で区切られた文章を、企画ごとの取り込み内容に分解する。
+
+    企画をまたぐメモを1回の貼り付けで登録するための入口。PROJECT行より前に
+    書かれた分は unassigned に入れ、画面側で行き先を選ばせる。
+    """
+    sections: list[dict[str, Any]] = []
+    lead: list[str] = []
+    current: dict[str, Any] | None = None
+
+    for raw in (text or "").splitlines():
+        match = PROJECT_RE.match(raw.strip())
+        if match:
+            fields = _split(match.group(1))
+            current = {"name": fields[0].strip(),
+                       "status": (fields[1].strip().upper()
+                                  if len(fields) > 1 and fields[1].strip()
+                                  else "ACTIVE"),
+                       "summary": fields[2].strip() if len(fields) > 2 else "",
+                       "lines": []}
+            sections.append(current)
+            continue
+        (current["lines"] if current else lead).append(raw)
+
+    projects = []
+    for section in sections:
+        if not section["name"]:
+            continue
+        parsed = parse_result("\n".join(section["lines"]))
+        projects.append({"name": section["name"], "status": section["status"],
+                         "summary": section["summary"], "parsed": parsed,
+                         "total": _count(parsed)})
+    unassigned = parse_result("\n".join(lead))
+    return {"projects": projects, "unassigned": unassigned,
+            "unassigned_total": _count(unassigned)}
+
+
+def _count(parsed: dict[str, Any]) -> int:
+    return sum(len(parsed[key]) for key in
+               ("phases", "decisions", "facts", "depends", "opens"))
+
+
+def apply_bulk(store: Store, bulk: dict[str, Any], actor: str = "bulk",
+               unassigned_project: str = "") -> dict[str, Any]:
+    """企画ごとに登録する。無い企画はここで作る。"""
+    from .store import slugify_id
+
+    results = []
+    for entry in bulk["projects"]:
+        project_id = slugify_id(entry["name"])
+        store.upsert_project(project_id, entry["name"], entry["status"] or "ACTIVE",
+                             entry.get("summary", ""), actor=actor)
+        written = apply_result(store, project_id, entry["parsed"], actor=actor)
+        results.append({"project": project_id, "name": entry["name"],
+                        "written": written})
+
+    if unassigned_project and _count(bulk["unassigned"]):
+        project_id = slugify_id(unassigned_project)
+        store.upsert_project(project_id, unassigned_project, actor=actor)
+        written = apply_result(store, project_id, bulk["unassigned"], actor=actor)
+        results.append({"project": project_id, "name": unassigned_project,
+                        "written": written})
+    return {"projects": results,
+            "total": sum(sum(r["written"].values()) for r in results)}
