@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 from typing import Any
 
@@ -72,6 +73,13 @@ label { display:block; margin:12px 0 4px; font-size:13px; color:var(--dim); }
 .flash { border-left:4px solid var(--ok); background:#12241a; padding:12px 16px;
          border-radius:8px; margin-bottom:18px; }
 .flash.bad { border-left-color:var(--bad); background:#2a1416; }
+.msg { border-radius:10px; padding:10px 14px; margin:0 0 10px;
+       white-space:pre-wrap; word-break:break-word; }
+.msg.user { background:#1d3247; margin-left:12%; }
+.msg.assistant { background:#0b0f14; border:1px solid var(--line); margin-right:12%; }
+.msg b { display:block; font-size:12px; color:var(--dim); font-weight:500; }
+pre.box { background:#0b0f14; border:1px solid var(--line); border-radius:8px;
+          padding:16px; white-space:pre-wrap; word-break:break-word; }
 """
 
 NAV = [
@@ -81,6 +89,7 @@ NAV = [
     ("/bulk", "まとめて取り込み"),
     ("/projects", "企画"),
     ("/profile", "私について"),
+    ("/local", "ローカルAI"),
     ("/agents", "AI設定"),
 ]
 
@@ -171,6 +180,8 @@ def dashboard(store: Store, message: str = "") -> str:
              f'<span>登録済み {len(handoffs)} 件から検索</span></a>'
              '<a class="big" href="/profile">👤 私について'
              f'<span>全AI共通の前提 {len(store.list_profile())} 件</span></a>'
+             '<a class="big" href="/local">🌱 ローカルAIを育てる'
+             '<span>話す → 学ばせる → 育てる</span></a>'
              '</div>')
 
     if missing:
@@ -794,6 +805,173 @@ def context_page(store: Store, result: dict[str, Any]) -> str:
              f'border-radius:8px;padding:16px;white-space:pre-wrap;'
              f'word-break:break-word">{e(result["text"])}</pre>')
     return page(f"コンテキスト（{result['role']}）", body)
+
+
+# ============================================================== ローカルAI
+
+def _local_status(status: dict[str, Any], settings: Any) -> str:
+    kind = "Ollama" if settings.kind == "ollama" else "OpenAI互換（LM Studio など）"
+    if status["ok"]:
+        head = (f'<p><span class="ok">● つながっています</span> '
+                f'<span class="dim">{e(kind)} / {e(settings.url)}</span></p>')
+        models = " ".join(f'<span class="tag">{e(m)}</span>'
+                          for m in status["models"])
+        head += f'<p class="dim">入っているモデル: {models or "なし"}</p>'
+        if not status["models"]:
+            head += ('<div class="note">モデルがまだありません。黒い画面で '
+                     '<code>ollama pull qwen2.5:7b</code> などを実行してください。</div>')
+    else:
+        head = (f'<p><span class="bad">● つながっていません</span></p>'
+                f'<div class="note">{e(status["error"])}</div>')
+
+    options = "".join(f'<option value="{e(m)}">' for m in status["models"])
+    return head + (
+        '<form method="post" action="/ui/local/settings">'
+        '<datalist id="models">' + options + '</datalist>'
+        '<div class="row">'
+        f'<div><label>接続先</label><input name="url" value="{e(settings.url)}">'
+        '</div>'
+        '<div><label>育てる元のモデル</label><input name="base_model" list="models"'
+        f' value="{e(settings.base_model)}" placeholder="例: qwen2.5:7b"></div>'
+        '</div><div class="row">'
+        '<div><label>育てたモデルの名前</label>'
+        f'<input name="name" value="{e(settings.name)}"></div>'
+        '<div><label>会話に使うモデル（空なら自動）</label><input name="model"'
+        f' list="models" value="{e(settings.model)}"></div>'
+        '</div><div class="actions"><button class="sub" type="submit">'
+        '設定を保存</button></div></form>')
+
+
+def _local_chat(store: Store, history: list[dict[str, str]], project: str,
+                model: str) -> str:
+    bubbles = "".join(
+        f'<div class="msg {e(m["role"])}"><b>'
+        f'{"あなた" if m["role"] == "user" else "ローカルAI"}</b>{e(m["content"])}'
+        "</div>" for m in history)
+    if not bubbles:
+        bubbles = ('<p class="empty">まだ会話はありません。企画を選んで話しかけて'
+                   'ください。第二の脳の確定情報を読んだうえで答えます。</p>')
+    hidden = e(json.dumps(history, ensure_ascii=False))
+    return bubbles + (
+        '<form method="post" action="/ui/local/chat">'
+        f'<input type="hidden" name="history" value="{hidden}">'
+        '<div class="row"><div><label>どの企画の話か</label>'
+        f'<select name="project">{project_options(store, project, "（指定しない）")}'
+        '</select></div>'
+        f'<div><label>使うモデル</label><input value="{e(model or "未設定")}" '
+        'disabled></div></div>'
+        '<label>話しかける</label>'
+        '<textarea name="message" rows="4" placeholder="例: 次に何をやるべき？"></textarea>'
+        '<div class="actions">'
+        '<button type="submit" name="action" value="send">送る</button> '
+        '<button class="sub" type="submit" name="action" value="reflect">'
+        '🌱 この会話から学ばせる</button> '
+        '<button class="sub" type="submit" name="action" value="reset">'
+        '最初から</button></div></form>'
+        '<p class="dim" style="margin-top:10px;font-size:13px">'
+        '会話そのものは保存しません。残るのは「学ばせる」で確認した結論だけです。</p>')
+
+
+def _local_learning(learned: dict[str, Any], project: str) -> str:
+    bulk = learned["bulk"]
+    rows: list[list[str]] = []
+    for item in bulk["profile"]:
+        rows.append(['<span class="tag">私について</span>', e(item["body"])])
+    parsed_sets = [("", bulk["unassigned"])] + [
+        (p["name"], p["parsed"]) for p in bulk["projects"]]
+    for name, parsed in parsed_sets:
+        where = f'（{e(name)}）' if name else ""
+        rows += [[f'<span class="tag ok">決定{where}</span>',
+                  e(d["title"]) + (f' <span class="dim">— {e(d["body"])}</span>'
+                                   if d["body"] else "")]
+                 for d in parsed["decisions"]]
+        rows += [[f'<span class="tag">事実{where}</span>', e(f["body"])]
+                 for f in parsed["facts"]]
+        rows += [[f'<span class="tag warn">未決{where}</span>', e(o["title"])]
+                 for o in parsed["opens"]]
+        rows += [[f'<span class="tag">工程{where}</span>',
+                  e(p["phase"]) + " " + status_badge(p["status"])]
+                 for p in parsed["phases"]]
+    if not rows:
+        return card("🌱 学び", '<p class="empty">今回の会話から残すべき結論は'
+                    '見つかりませんでした。</p>'
+                    f'<pre class="box">{e(learned["text"])}</pre>', wide=True)
+    warn = ""
+    if bulk["unassigned_total"] and not project:
+        warn = ('<div class="note"><span class="warn">企画が選ばれていないため、'
+                '決定・事実・未決・工程は保存されません。</span>'
+                '会話欄で企画を選んでからやり直してください。</div>')
+    return card("🌱 学び — 保存してよいものを確認してください", table(["種類", "内容"], rows)
+        + warn
+        + '<details><summary class="dim">ローカルAIの出力そのもの</summary>'
+        f'<pre class="box">{e(learned["text"])}</pre></details>'
+        '<form method="post" action="/ui/local/learn">'
+        f'<input type="hidden" name="text" value="{e(learned["text"])}">'
+        f'<input type="hidden" name="project" value="{e(project)}">'
+        '<div class="actions"><button type="submit">第二の脳へ保存する</button>'
+        '</div></form>', wide=True)
+
+
+def _local_growth(store: Store, settings: Any, counts: dict[str, int],
+                  log: list[dict[str, Any]], persona: str, tokens: int) -> str:
+    last = log[-1] if log else None
+    labels = [("profile", "私について"), ("projects", "企画"),
+              ("decisions", "確定事項"), ("facts", "事実")]
+    cells = []
+    for key, label in labels:
+        diff = counts[key] - (last.get(key, 0) if last else 0)
+        plus = f' <span class="ok">+{diff}</span>' if last and diff > 0 else ""
+        cells.append(f"{label} <b>{counts[key]}</b>{plus}")
+    body = '<p>' + " ／ ".join(cells) + "</p>"
+    if last:
+        body += (f'<p class="dim">前回育てたのは {e(last["at"][:16].replace("T", " "))}'
+                 f'（{len(log)} 回目）。<span class="ok">+</span> は前回から増えた知識です。</p>')
+    else:
+        body += '<p class="dim">まだ一度も育てていません。</p>'
+    if settings.kind == "ollama":
+        disabled = "" if settings.base_model else " disabled"
+        body += ('<form method="post" action="/ui/local/grow"><div class="actions">'
+                 f'<button type="submit"{disabled}>🌳 いまの第二の脳でモデルを育てる'
+                 '</button></div></form>')
+        body += (f'<p class="dim" style="font-size:13px">{e(settings.base_model or "元のモデル")}'
+                 f' に第二の脳（約 {tokens} トークン）を焼き込み、'
+                 f'<code>{e(settings.name)}</code> として作り直します。'
+                 '元のモデルは変わりません。</p>')
+    else:
+        body += ('<div class="note">LM Studio などOpenAI互換の接続では、モデルの作り直しは'
+                 'できません。会話のたびに第二の脳を読み込ませる形で育ちます。</div>')
+    body += ('<details><summary class="dim">焼き込む内容を見る</summary>'
+             f'<pre class="box">{e(persona)}</pre></details>')
+    rows = [[e(g["at"][:16].replace("T", " ")), e(g.get("base", "")),
+             str(g.get("profile", 0)), str(g.get("decisions", 0)),
+             str(g.get("facts", 0)), str(g.get("tokens", 0))]
+            for g in reversed(log[-10:])]
+    body += "<h3 style='margin-top:18px'>成長記録</h3>" + table(
+        ["日時", "元モデル", "私について", "確定事項", "事実", "トークン"], rows,
+        "まだ記録はありません")
+    return card("🌳 育てる", body, wide=True)
+
+
+def local_page(store: Store, status: dict[str, Any], settings: Any,
+               counts: dict[str, int], log: list[dict[str, Any]], persona: str,
+               tokens: int, history: list[dict[str, str]] | None = None,
+               project: str = "", chat_model: str = "",
+               learned: dict[str, Any] | None = None, message: str = "",
+               bad: bool = False) -> str:
+    """手元のAIと話し、学ばせ、育てる画面。"""
+    body = flash(message, bad)
+    body += '<h2 class="page">ローカルAI</h2>'
+    body += ('<p class="lead">手元で動くAI（Ollama / LM Studio）を第二の脳につなぎます。'
+             '<b>話す → 学ばせる → 育てる</b> を繰り返すほど、あなたの企画と進め方を'
+             '知ったAIになります。</p>')
+    body += '<div class="grid">'
+    body += card("① つなぐ", _local_status(status, settings))
+    body += card("② 話す", _local_chat(store, history or [], project, chat_model))
+    if learned is not None:
+        body += _local_learning(learned, project)
+    body += _local_growth(store, settings, counts, log, persona, tokens)
+    body += "</div>"
+    return page("ローカルAI", body, "/local")
 
 
 def login_page(failed: bool) -> str:

@@ -19,6 +19,7 @@ from .http_util import HttpError, Request, Response
 from .bundle import build_bundle
 from .intake import (apply_bulk, apply_result, parse_bulk, parse_memory,
                      parse_result)
+from . import local_ai
 from .scan import DEFAULT_KEYWORDS, import_handoffs
 from .store import Invalid, NotFound, Store, slugify_id
 
@@ -39,10 +40,16 @@ def route(method: str, pattern: str, public: bool = False):
 
 
 class App:
-    def __init__(self, store: Store, config: Config | None = None):
+    def __init__(self, store: Store, config: Config | None = None,
+                 local_transport: local_ai.Transport | None = None):
         self.store = store
         self.config = config or Config()
         self.router = ContextRouter(store, self.config.token_budget)
+        #: テストでは偽のローカルAIを差し込む。
+        self.local_transport = local_transport
+
+    def local_ai(self) -> local_ai.LocalAI:
+        return local_ai.LocalAI.from_store(self.store, self.local_transport)
 
     # ------------------------------------------------------------ dispatch
 
@@ -567,6 +574,103 @@ def ui_context(app: App, request: Request, params: dict[str, str]) -> Response:
     result = app.router.build(params["role"], request.q("project"),
                               app._budget(request))
     return Response.html(ui.context_page(app.store, result))
+
+
+# ============================================================ ローカルAI
+
+def _local_page(app: App, ai: local_ai.LocalAI | None = None, **extra: Any
+                ) -> Response:
+    ai = ai or app.local_ai()
+    persona = local_ai.build_persona(app.store)
+    return Response.html(ui.local_page(
+        app.store, ai.status(), ai.settings, local_ai.knowledge_counts(app.store),
+        local_ai.growth_log(app.store), persona,
+        local_ai.estimate_tokens(persona),
+        chat_model=ai.settings.chat_model(ai.grown), **extra))
+
+
+@route("GET", "/local")
+def ui_local(app: App, request: Request, _: dict[str, str]) -> Response:
+    return _local_page(app, message=request.q("msg", "") or "",
+                       bad=request.q("bad") == "1")
+
+
+@route("POST", "/ui/local/settings")
+def ui_local_settings(app: App, request: Request, _: dict[str, str]) -> Response:
+    form = request.payload()
+    local_ai.save_settings(app.store, local_ai.Settings(
+        url=str(form.get("url", "")), model=str(form.get("model", "")).strip(),
+        base_model=str(form.get("base_model", "")).strip(),
+        name=str(form.get("name", ""))))
+    return Response.redirect("/local?msg=" + quote("設定を保存しました"))
+
+
+@route("POST", "/ui/local/chat")
+def ui_local_chat(app: App, request: Request, _: dict[str, str]) -> Response:
+    """1往復話す／会話から学びを抜き出す。会話は画面に持ち回すだけで保存しない。"""
+    form = request.payload()
+    project = str(form.get("project", "")).strip()
+    history = local_ai.parse_history(str(form.get("history", "")))
+    action = form.get("action", "send")
+    if action == "reset":
+        return Response.redirect("/local")
+    ai = app.local_ai()
+    try:
+        if action == "reflect":
+            text = local_ai.reflect(ai, app.router, history, project=project or None)
+            learned = {"text": text, "bulk": local_ai.parse_learning(text)}
+            return _local_page(app, ai, history=history, project=project,
+                               learned=learned)
+        message = str(form.get("message", "")).strip()
+        if not message:
+            return _local_page(app, ai, history=history, project=project,
+                               message="話しかける内容を入力してください", bad=True)
+        history = local_ai.converse(ai, app.router, history, message,
+                                    project=project or None)
+    except local_ai.LocalAIError as exc:
+        return _local_page(app, ai, history=history, project=project,
+                           message=str(exc), bad=True)
+    return _local_page(app, ai, history=history, project=project)
+
+
+@route("POST", "/ui/local/learn")
+def ui_local_learn(app: App, request: Request, _: dict[str, str]) -> Response:
+    form = request.payload()
+    project = str(form.get("project", "")).strip()
+    if project:
+        app.store.require_project(project)
+    result = local_ai.apply_learning(app.store, str(form.get("text", "")), project)
+    return Response.redirect("/local?msg=" + quote(
+        f"{result['total']} 件を第二の脳へ保存しました。"
+        "「育てる」でモデルにも覚えさせられます"))
+
+
+@route("POST", "/ui/local/grow")
+def ui_local_grow(app: App, request: Request, _: dict[str, str]) -> Response:
+    ai = app.local_ai()
+    try:
+        entry = local_ai.grow(ai, app.store)
+    except local_ai.LocalAIError as exc:
+        return Response.redirect("/local?bad=1&msg=" + quote(str(exc)))
+    return Response.redirect("/local?msg=" + quote(
+        f"{entry['name']} を育てました（確定事項 {entry['decisions']} 件・"
+        f"事実 {entry['facts']} 件・私について {entry['profile']} 件）"))
+
+
+@route("POST", "/api/local/chat")
+def api_local_chat(app: App, request: Request, _: dict[str, str]) -> Response:
+    """{message, project?, role?, history?[]} → {answer, history}"""
+    payload = app._payload(request)
+    (message,) = app._require(payload, "message")
+    history = payload.get("history") or []
+    try:
+        history = local_ai.converse(
+            app.local_ai(), app.router,
+            history if isinstance(history, list) else [], str(message),
+            str(payload.get("role") or "local"), payload.get("project") or None)
+    except local_ai.LocalAIError as exc:
+        raise HttpError(502, str(exc)) from exc
+    return Response.json({"answer": history[-1]["content"], "history": history})
 
 
 @route("GET", "/login", public=True)

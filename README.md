@@ -30,7 +30,7 @@
 ```bash
 # 1) 第二の脳
 cd second_brain
-python run.py init          # DB作成 + 役割5種を投入
+python run.py init          # DB作成 + 役割6種を投入
 python run.py seed          # サンプル企画（不要なら省略）
 python run.py serve         # http://127.0.0.1:8900
 
@@ -42,7 +42,7 @@ python app.py               # http://<このPCのIP>:5000
 
 詳細は各ディレクトリの README を参照:
 
-- [second_brain/README.md](second_brain/README.md) — API、ロールプロファイル、MCP設定、外部公開
+- [second_brain/README.md](second_brain/README.md) — API、ロールプロファイル、MCP設定、外部公開、ローカルAIの育て方
 - [SOT21_Controller/README.md](SOT21_Controller/README.md) — config.json、ボタン追加、SOT21側の設定
 
 ## 設計の芯
@@ -56,6 +56,6 @@ python app.py               # http://<このPCのIP>:5000
 ## テスト
 
 ```bash
-python -m unittest discover -s second_brain/tests -t second_brain/tests   # 68件
-cd SOT21_Controller && python -m unittest discover -s tests -t tests      # 42件
+python -m unittest discover -s second_brain/tests -t second_brain/tests   # 189件
+cd SOT21_Controller && python -m unittest discover -s tests -t tests      # 44件
 ```
