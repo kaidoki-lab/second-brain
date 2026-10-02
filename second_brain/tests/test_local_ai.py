@@ -50,6 +50,12 @@ class FakeOllama:
                 return {"message": {"role": "assistant", "content": LEARNED}}
             return {"message": {"role": "assistant",
                                 "content": "<think>考え中</think>" + self.reply}}
+        if path == "/api/pull":
+            if payload["model"] == "no-such-model":
+                return {"error": "pull model manifest: file does not exist"}
+            self.models.append(payload["model"] + ("" if ":" in payload["model"]
+                                                    else ":latest"))
+            return {"status": "success"}
         if path == "/api/create":
             self.models.append(payload["model"] + ":latest")
             return {"status": "success"}
@@ -215,6 +221,44 @@ class GrowthTest(unittest.TestCase):
 
     def test_strip_thinking(self):
         self.assertEqual(local_ai.strip_thinking("<think>a</think>答え"), "答え")
+
+
+class LlamaInstallTest(unittest.TestCase):
+    def setUp(self):
+        self.store = fresh_store()
+        self.fake = FakeOllama(models=())
+        self.app = App(self.store, Config(api_key=None), local_transport=self.fake)
+
+    def post(self, target, **fields):
+        body = urllib.parse.urlencode(fields).encode()
+        return self.app.handle(Request.make("POST", target, FORM, body))
+
+    def test_llama_is_offered_and_installed_from_the_page(self):
+        page = self.app.handle(Request.make("GET", "/local")).body.decode()
+        self.assertIn("Llama 3.1 8B", page)
+        self.assertIn("入れる", page)
+
+        res = self.post("/ui/local/pull", model="llama3.1:8b")
+        self.assertEqual(res.status, 303)
+        self.assertNotIn("bad=1", res.headers["Location"])
+        self.assertIn("llama3.1:8b", self.fake.models)
+        self.assertEqual(local_ai.load_settings(self.store).base_model, "llama3.1:8b")
+
+        page = self.app.handle(Request.make("GET", "/local")).body.decode()
+        self.assertIn("育成中の元モデル", page)
+        # 入れたLlamaでそのまま育てられる。
+        self.assertEqual(self.post("/ui/local/grow").status, 303)
+        create = [p for _, path, p in self.fake.calls if path == "/api/create"][0]
+        self.assertEqual(create["from"], "llama3.1:8b")
+
+    def test_pull_failure_is_reported(self):
+        res = self.post("/ui/local/pull", model="no-such-model")
+        self.assertIn("bad=1", res.headers["Location"])
+        self.assertEqual(local_ai.load_settings(self.store).base_model, "")
+
+    def test_has_model_understands_latest_tag(self):
+        self.assertTrue(local_ai.has_model(["second-brain:latest"], "second-brain"))
+        self.assertFalse(local_ai.has_model(["llama3.2:3b"], "llama3.1:8b"))
 
 
 class LocalPageTest(unittest.TestCase):

@@ -824,6 +824,9 @@ def _local_status(status: dict[str, Any], settings: Any) -> str:
         head = (f'<p><span class="bad">● つながっていません</span></p>'
                 f'<div class="note">{e(status["error"])}</div>')
 
+    if status["ok"] and settings.kind == "ollama":
+        head += _local_recommended(status["models"], settings.base_model)
+
     options = "".join(f'<option value="{e(m)}">' for m in status["models"])
     return head + (
         '<form method="post" action="/ui/local/settings">'
@@ -832,7 +835,7 @@ def _local_status(status: dict[str, Any], settings: Any) -> str:
         f'<div><label>接続先</label><input name="url" value="{e(settings.url)}">'
         '</div>'
         '<div><label>育てる元のモデル</label><input name="base_model" list="models"'
-        f' value="{e(settings.base_model)}" placeholder="例: qwen2.5:7b"></div>'
+        f' value="{e(settings.base_model)}" placeholder="例: llama3.1:8b"></div>'
         '</div><div class="row">'
         '<div><label>育てたモデルの名前</label>'
         f'<input name="name" value="{e(settings.name)}"></div>'
@@ -840,6 +843,25 @@ def _local_status(status: dict[str, Any], settings: Any) -> str:
         f' list="models" value="{e(settings.model)}"></div>'
         '</div><div class="actions"><button class="sub" type="submit">'
         '設定を保存</button></div></form>')
+
+
+def _local_recommended(models: list[str], base: str) -> str:
+    from .local_ai import RECOMMENDED, has_model
+    rows = []
+    for name, label, note in RECOMMENDED:
+        if name == base:
+            action = '<span class="ok">育成中の元モデル</span>'
+        else:
+            verb = "これで育てる" if has_model(models, name) else "入れる"
+            action = ('<form method="post" action="/ui/local/pull">'
+                      f'<input type="hidden" name="model" value="{e(name)}">'
+                      f'<button class="sub" type="submit" style="white-space:nowrap">{verb}</button></form>')
+        rows.append([f"<b>{e(label)}</b><br><span class=\"dim\" "
+                     f"style=\"font-size:13px\">{e(note)}</span>", action])
+    return ('<h3 style="margin-top:14px">Llama を入れる</h3>'
+            + table(["モデル", ""], rows)
+            + '<p class="dim" style="font-size:13px">「入れる」はダウンロードが終わるまで'
+            '数分〜数十分かかります。画面を閉じずにお待ちください。</p>')
 
 
 def _local_chat(store: Store, history: list[dict[str, str]], project: str,

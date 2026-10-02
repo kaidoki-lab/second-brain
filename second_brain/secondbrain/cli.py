@@ -82,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     grow.add_argument("--name", help="育てたモデルの名前（既定: second-brain）")
     grow.add_argument("--url", help="Ollama の場所（既定: http://127.0.0.1:11434）")
     grow.add_argument("--modelfile", help="Modelfile を書き出すだけ（Ollamaへは送らない）")
+    grow.add_argument("--pull", action="store_true",
+                      help="元のモデルが無ければ先に取得する（例: --base llama3.1:8b --pull）")
 
     ask = sub.add_parser("ask", help="ローカルAIに第二の脳を前提に質問する")
     ask.add_argument("message")
@@ -266,6 +268,14 @@ def _grow(store: Store, args: argparse.Namespace) -> int:
         elif status["error"]:
             print("  " + status["error"])
         return 1
+    if args.pull and not local_ai.has_model(ai.status()["models"],
+                                            settings.base_model):
+        print(f"{settings.base_model} をダウンロードしています（数分〜数十分）…")
+        try:
+            ai.pull(settings.base_model)
+        except local_ai.LocalAIError as exc:
+            print(exc)
+            return 1
     print(f"{settings.base_model} に第二の脳を焼き込んでいます…")
     try:
         entry = local_ai.grow(ai, store)

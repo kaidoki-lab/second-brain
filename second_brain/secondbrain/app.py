@@ -605,6 +605,18 @@ def ui_local_settings(app: App, request: Request, _: dict[str, str]) -> Response
     return Response.redirect("/local?msg=" + quote("設定を保存しました"))
 
 
+@route("POST", "/ui/local/pull")
+def ui_local_pull(app: App, request: Request, _: dict[str, str]) -> Response:
+    """Llama などを Ollama に取得させ、そのまま育てる元のモデルにする。"""
+    model = str(app._payload(request).get("model", "")).strip()
+    try:
+        local_ai.install_model(app.local_ai(), app.store, model)
+    except local_ai.LocalAIError as exc:
+        return Response.redirect("/local?bad=1&msg=" + quote(str(exc)))
+    return Response.redirect("/local?msg=" + quote(
+        f"{model} を入れました。話しかけるか「育てる」を押してください"))
+
+
 @route("POST", "/ui/local/chat")
 def ui_local_chat(app: App, request: Request, _: dict[str, str]) -> Response:
     """1往復話す／会話から学びを抜き出す。会話は画面に持ち回すだけで保存しない。"""

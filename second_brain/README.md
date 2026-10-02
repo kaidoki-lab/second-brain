@@ -65,7 +65,7 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | `verify [--project P]` | 索引したファイルの存在確認 |
 | `export [--out brain.md]` | brain.md を書き出す |
 | `key` | APIキー生成 |
-| `grow [--base M --name N --url U --modelfile PATH]` | 第二の脳を焼き込んでローカルAIを育てる |
+| `grow [--base M --pull --name N --url U --modelfile PATH]` | 第二の脳を焼き込んでローカルAIを育てる |
 | `ask "質問" [--project P --role R]` | ローカルAIに第二の脳を前提に質問する |
 
 ## ブラウザUI（日本語・コマンド不要）
@@ -98,8 +98,20 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
    └───────────────────────────────────────────────────────────────────────┘
 ```
 
-1. Ollama を入れて、元になるモデルを1つ取得する（例 `ollama pull qwen2.5:7b`）
-2. `/local` を開き、「育てる元のモデル」を選んで保存（①つなぐ）
+1. Ollama を入れて `/local` を開き、「Llama を入れる」から1つ選んで「入れる」（①つなぐ）。
+   取得が終わると、そのまま育てる元のモデルになる
+
+   | モデル | 目安 |
+   | --- | --- |
+   | Llama 3.2 3B (`llama3.2:3b`) | 軽い（約2GB）。ノートPCやGPUなしでも動く |
+   | Llama 3.1 8B (`llama3.1:8b`) | 標準（約4.9GB）。GPUメモリ8GB以上がおすすめ |
+   | Llama 3 ELYZA JP 8B | 日本語を追加学習したLlama（約4.9GB） |
+
+   **いちばん簡単なのは `llama.bat` をダブルクリック。** Ollama が無ければ winget で入れ、
+   Llama 3.1 8B を取得し、第二の脳を覚えさせるところまで一気に行う
+   （別のモデルにするなら `llama.bat llama3.2:3b`）。
+   Llama 以外（`qwen2.5:7b` など）も「育てる元のモデル」に名前を入れれば使える
+2. （手動の場合）`ollama pull llama3.1:8b` してから「育てる元のモデル」に入れて保存
 3. 企画を選んで話しかける（②話す）。第二の脳の確定情報を読んだうえで答える
 4. 「🌱 この会話から学ばせる」→ 決定・事実・未決・私についての候補が出る →
    確認して「第二の脳へ保存する」（③学ばせる）

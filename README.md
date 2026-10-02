@@ -56,6 +56,6 @@ python app.py               # http://<このPCのIP>:5000
 ## テスト
 
 ```bash
-python -m unittest discover -s second_brain/tests -t second_brain/tests   # 189件
+python -m unittest discover -s second_brain/tests -t second_brain/tests   # 192件
 cd SOT21_Controller && python -m unittest discover -s tests -t tests      # 44件
 ```

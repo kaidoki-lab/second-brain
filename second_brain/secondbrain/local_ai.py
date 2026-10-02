@@ -34,6 +34,16 @@ PERSONA_BUDGET = 3000
 #: 画面に持ち回す会話の上限（古いものから捨てる）。
 HISTORY_LIMIT = 20
 
+#: 画面から1クリックで入れられるモデル（Ollama のモデル名, 表示名, 説明）。
+RECOMMENDED: list[tuple[str, str, str]] = [
+    ("llama3.2:3b", "Llama 3.2 3B", "軽い（約2GB）。ノートPCやGPUなしでも動く"),
+    ("llama3.1:8b", "Llama 3.1 8B", "標準（約4.9GB）。GPUメモリ8GB以上がおすすめ"),
+    ("hf.co/elyza/Llama-3-ELYZA-JP-8B-GGUF", "Llama 3 ELYZA JP 8B",
+     "日本語を追加学習したLlama（約4.9GB）。日本語の受け答えが自然"),
+]
+#: モデルの取得は数GBのダウンロードになるので長めに待つ。
+PULL_TIMEOUT = 3600
+
 SETTINGS_KEY = "local_ai"
 GROWTH_KEY = "local_ai_growth"
 
@@ -191,6 +201,19 @@ class LocalAI:
 
     # -- 育成 ---------------------------------------------------------------
 
+    def pull(self, model: str) -> None:
+        """Ollama にモデルを取得させる（すでにあれば差分だけ）。"""
+        if self.settings.kind != "ollama":
+            raise LocalAIError("モデルの取得は Ollama のときだけです。"
+                               "LM Studio では画面からモデルを入れてください。")
+        model = model.strip()
+        if not model:
+            raise LocalAIError("取得するモデルを選んでください。")
+        data = self._call("POST", "/api/pull", {"model": model, "stream": False},
+                          timeout=PULL_TIMEOUT) or {}
+        if data.get("error"):
+            raise LocalAIError(f"{model} を取得できませんでした: {data['error']}")
+
     def create_model(self, name: str, base: str, system: str) -> None:
         """第二の脳を焼き込んだモデルを Ollama に作る（同名なら作り直す）。"""
         if self.settings.kind != "ollama":
@@ -346,6 +369,19 @@ def modelfile(base: str, system: str) -> str:
     return (f"FROM {base}\n"
             f"PARAMETER num_ctx {NUM_CTX}\n"
             f'SYSTEM """{safe}"""\n')
+
+
+def has_model(models: list[str], name: str) -> bool:
+    """Ollama は "llama3.2:3b" を、タグ省略なら ":latest" 付きで返す。"""
+    return name in models or f"{name}:latest" in models
+
+
+def install_model(ai: LocalAI, store: Store, model: str) -> Settings:
+    """モデルを取得し、育てる元のモデルとして設定する。"""
+    ai.pull(model)
+    settings = ai.settings
+    settings.base_model = model.strip()
+    return save_settings(store, settings)
 
 
 def growth_log(store: Store) -> list[dict[str, Any]]:
