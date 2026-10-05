@@ -32,7 +32,7 @@
 コマンドで起動する場合:
 
 ```bash
-python run.py init            # 初回のみ: DB作成＋既定ロール5種を投入
+python run.py init            # 初回のみ: DB作成＋既定ロール6種を投入
 python run.py serve           # http://127.0.0.1:8900
 python run.py seed            # 任意: サンプル（SYNAPTIC GROVE）を投入
 ```
@@ -65,6 +65,8 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | `verify [--project P]` | 索引したファイルの存在確認 |
 | `export [--out brain.md]` | brain.md を書き出す |
 | `key` | APIキー生成 |
+| `grow [--base M --pull --name N --url U --modelfile PATH]` | 第二の脳を焼き込んでローカルAIを育てる |
+| `ask "質問" [--project P --role R]` | ローカルAIに第二の脳を前提に質問する |
 
 ## ブラウザUI（日本語・コマンド不要）
 
@@ -79,8 +81,54 @@ DBの場所は `~/.second_brain/brain.db`（`--db` か `SECOND_BRAIN_DB` で変�
 | `/project/{id}/intake` | **AIの回答を工程表として取り込む**（確認してから保存） |
 | `/bulk` | **まとめて取り込み**（複数企画を1回の貼り付けで登録） |
 | `/profile` | **私について**（全AI共通の前提）の取り込みと管理 |
+| `/local` | **ローカルAIを育てる**（話す → 学ばせる → 育てる） |
 | `/agents` | AIごとの「見せる情報／見せない情報／評価軸／禁止事項」 |
 | `/preview/context/{role}` | そのAIへ実際に渡る文章とトークン数（コピーして貼るだけ） |
+
+### ローカルAIを育てる
+
+手元で動くAI（[Ollama](https://ollama.com) / LM Studio）を第二の脳につなぎ、
+使うほど「あなたの企画と進め方を知ったAI」にしていく。重みの学習はしない。
+第二の脳に結論を貯め、それをモデルへ焼き込み直すことで育てる。
+
+```
+ ② 話す ──→ ③ 学ばせる ──→ 第二の脳 ──→ ④ 育てる ──→ 次の会話はもっと分かっている
+   ↑   第二の脳の確定情報を     会話から結論だけ       確定事項・事実・私について     │
+   │   前提にして答える         抜き出して確認・保存    を焼き込んだモデルを作り直す  │
+   └───────────────────────────────────────────────────────────────────────┘
+```
+
+1. Ollama を入れて `/local` を開き、「Llama を入れる」から1つ選んで「入れる」（①つなぐ）。
+   取得が終わると、そのまま育てる元のモデルになる
+
+   | モデル | 目安 |
+   | --- | --- |
+   | Llama 3.2 3B (`llama3.2:3b`) | 軽い（約2GB）。ノートPCやGPUなしでも動く |
+   | Llama 3.1 8B (`llama3.1:8b`) | 標準（約4.9GB）。GPUメモリ8GB以上がおすすめ |
+   | Llama 3 ELYZA JP 8B | 日本語を追加学習したLlama（約4.9GB） |
+
+   **いちばん簡単なのは `llama.bat` をダブルクリック。** Ollama が無ければ winget で入れ、
+   Llama 3.1 8B を取得し、第二の脳を覚えさせるところまで一気に行う
+   （別のモデルにするなら `llama.bat llama3.2:3b`）。
+   Llama 以外（`qwen2.5:7b` など）も「育てる元のモデル」に名前を入れれば使える
+2. （手動の場合）`ollama pull llama3.1:8b` してから「育てる元のモデル」に入れて保存
+3. 企画を選んで話しかける（②話す）。第二の脳の確定情報を読んだうえで答える
+4. 「🌱 この会話から学ばせる」→ 決定・事実・未決・私についての候補が出る →
+   確認して「第二の脳へ保存する」（③学ばせる）
+5. 「🌳 いまの第二の脳でモデルを育てる」で `second-brain` モデルを作り直す（④育てる）。
+   以後の会話は育てたモデルが使われ、`ollama run second-brain` でも直接話せる
+
+- **会話そのものは保存しない。** 残るのは確認して保存した結論だけ（他のAIにも共有される）
+- 成長記録に、育てた日時と覚えている件数（前回からの増分）が残る
+- 元のモデルは変わらない。いつでも作り直せる
+- 焼き込むのは「私について」と進行中の企画の確定事項・事実（約3000トークン以内に自動で圧縮）
+- LM Studio など OpenAI 互換サーバーは接続先を `http://127.0.0.1:1234/v1` にする。
+  モデルの作り直しはできないが、会話と学ばせるは使える
+- ダブルクリック派は `grow.bat`（初回のみ `grow.bat qwen2.5:7b` のように元のモデルを渡す）
+- 手で作りたい場合は `python run.py grow --modelfile Modelfile` → `ollama create second-brain -f Modelfile`
+- 環境変数 `SECOND_BRAIN_LOCAL_AI_URL` / `SECOND_BRAIN_LOCAL_AI_BASE` /
+  `SECOND_BRAIN_LOCAL_AI_MODEL` でも初期値を指定できる（画面で保存した設定が優先）
+- API: `POST /api/local/chat {message, project?, role?, history?[]}` → `{answer, history}`
 
 ### ファイルから一括投入（貼り付け不要）
 
@@ -210,7 +258,7 @@ curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
 
 ## ロールプロファイル
 
-既定で5種。`/agents` かAPIで自由に追加・変更できる。
+既定で6種。`/agents` かAPIで自由に追加・変更できる。
 
 | role | 見る | 見ない | 評価軸 | 禁止 |
 | --- | --- | --- | --- | --- |
@@ -219,6 +267,7 @@ curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
 | builder | 確定仕様・API・ファイル・依存 | 世界観・未確定案・失敗履歴 | 正確性／安定性／保守性／再現性 | 勝手な仕様変更 |
 | critic | 現在案・決定・失敗履歴・依存 | アセット・ハンドオフ | 破綻点／依存リスク／矛盾／見落とし | 無条件な賛成 |
 | explorer | 目的・制約・確定事項のみ | 既存案の細部すべて | 新規性／差別化／可能性 | 現行案の言い換え |
+| local | 私について・現在地・決定（確定／未決）・事実・依存 | ファイル・ハンドオフ・API | 確定事項との整合／具体性／次の一手 | 第二の脳に無いことの断定、確定事項を勝手に覆す |
 
 `visible_context` に指定できるセクション名:
 `project, summary, current_phase, status, owner, locked_decisions, open_decisions,

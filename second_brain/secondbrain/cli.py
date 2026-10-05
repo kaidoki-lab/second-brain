@@ -9,6 +9,8 @@
     python run.py verify [--project P]
     python run.py export [--out brain.md]
     python run.py key                  API キーを生成して表示
+    python run.py grow [--base M]      第二の脳を焼き込んでローカルAIを育てる
+    python run.py ask "質問" [--project]  ローカルAIに第二の脳を前提に聞く
 """
 
 from __future__ import annotations
@@ -74,6 +76,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export", help="brain.md を書き出す")
     export.add_argument("--out")
+
+    grow = sub.add_parser("grow", help="第二の脳を焼き込んでローカルAI（Ollama）を育てる")
+    grow.add_argument("--base", help="育てる元のモデル（例: qwen2.5:7b）。次回から省略可")
+    grow.add_argument("--name", help="育てたモデルの名前（既定: second-brain）")
+    grow.add_argument("--url", help="Ollama の場所（既定: http://127.0.0.1:11434）")
+    grow.add_argument("--modelfile", help="Modelfile を書き出すだけ（Ollamaへは送らない）")
+    grow.add_argument("--pull", action="store_true",
+                      help="元のモデルが無ければ先に取得する（例: --base llama3.1:8b --pull）")
+
+    ask = sub.add_parser("ask", help="ローカルAIに第二の脳を前提に質問する")
+    ask.add_argument("message")
+    ask.add_argument("--project")
+    ask.add_argument("--role", default="local")
     return parser
 
 
@@ -209,4 +224,68 @@ def main(argv: list[str] | None = None) -> int:
             print(markdown)
         return 0
 
+    if args.command == "grow":
+        return _grow(store, args)
+
+    if args.command == "ask":
+        from .local_ai import LocalAI, LocalAIError, converse
+        try:
+            history = converse(LocalAI.from_store(store),
+                               ContextRouter(store, config.token_budget), [],
+                               args.message, args.role, args.project)
+        except LocalAIError as exc:
+            print(exc)
+            return 1
+        print(history[-1]["content"])
+        return 0
+
     return 1
+
+
+def _grow(store: Store, args: argparse.Namespace) -> int:
+    from . import local_ai
+    settings = local_ai.load_settings(store)
+    settings.base_model = args.base or settings.base_model
+    settings.name = args.name or settings.name
+    settings.url = args.url or settings.url
+    local_ai.save_settings(store, settings)
+
+    persona = local_ai.build_persona(store)
+    if args.modelfile:
+        base = settings.base_model or "qwen2.5:7b"
+        Path(args.modelfile).write_text(local_ai.modelfile(base, persona),
+                                        encoding="utf-8")
+        print(f"書き出しました: {args.modelfile}")
+        print(f"  ollama create {settings.name} -f {args.modelfile}")
+        return 0
+
+    ai = local_ai.LocalAI(settings)
+    if not settings.base_model:
+        status = ai.status()
+        print("育てる元のモデルを --base で指定してください。")
+        if status["models"]:
+            print("  入っているモデル: " + ", ".join(status["models"]))
+        elif status["error"]:
+            print("  " + status["error"])
+        return 1
+    if args.pull and not local_ai.has_model(ai.status()["models"],
+                                            settings.base_model):
+        print(f"{settings.base_model} をダウンロードしています（数分〜数十分）…")
+        try:
+            ai.pull(settings.base_model)
+        except local_ai.LocalAIError as exc:
+            print(exc)
+            return 1
+    print(f"{settings.base_model} に第二の脳を焼き込んでいます…")
+    try:
+        entry = local_ai.grow(ai, store)
+    except local_ai.LocalAIError as exc:
+        print(exc)
+        return 1
+    log = local_ai.growth_log(store)
+    print(f"育ちました: {entry['name']}（{len(log)} 回目）")
+    print(f"  私について {entry['profile']} / 企画 {entry['projects']} / "
+          f"確定事項 {entry['decisions']} / 事実 {entry['facts']}"
+          f"（約 {entry['tokens']} トークン）")
+    print(f"  話しかける: ollama run {entry['name']}")
+    return 0

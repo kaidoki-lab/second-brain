@@ -643,6 +643,26 @@ class Store:
             "changes": self.recent_changes(10, project_id),
         }
 
+    # ------------------------------------------------------------------ meta
+
+    def get_meta(self, key: str, default: Any = None) -> Any:
+        """設定や記録をJSONで1件ずつ置く小さな棚。"""
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?",
+                                (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value"])
+        except json.JSONDecodeError:
+            return row["value"]
+
+    def set_meta(self, key: str, value: Any) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, json.dumps(value, ensure_ascii=False)))
+
     def brain_snapshot(self) -> dict[str, Any]:
         return {
             "generated_at": now(),

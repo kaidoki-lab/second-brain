@@ -85,6 +85,22 @@ ROLE_PROFILES: list[dict[str, Any]] = [
         "evaluation_axes": ["新規性", "差別化", "可能性"],
         "prohibitions": ["現行案の言い換え"],
     },
+    {
+        "id": "local",
+        "name": "ローカルAI",
+        "goal": "手元で常駐し、第二の脳の確定情報に沿って相談に乗る",
+        "priority": "依頼主の進め方に合わせ、確定事項と食い違わない次の一手を出す",
+        "visible_context": [
+            "profile",
+            "project", "summary", "current_phase", "status", "locked_decisions",
+            "open_decisions", "facts", "dependencies", "deliverables",
+            "recent_changes",
+        ],
+        "hidden_context": ["files", "handoff", "api"],
+        "evaluation_axes": ["確定事項との整合", "具体性", "次の一手"],
+        "prohibitions": ["第二の脳に無いことを事実として断定する",
+                         "確定事項を勝手に覆す"],
+    },
 ]
 
 DEFAULT_AGENTS: list[dict[str, Any]] = [
@@ -96,11 +112,13 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
     {"id": "critic", "name": "Critic AI", "role": "批評", "context_profile": "critic"},
     {"id": "explorer", "name": "Explorer AI", "role": "探索",
      "context_profile": "explorer"},
+    {"id": "local", "name": "ローカルAI", "role": "相談役",
+     "context_profile": "local"},
 ]
 
 
 def install_defaults(store: Store) -> None:
-    """Idempotently install the five role profiles and their agents."""
+    """Idempotently install the built-in role profiles and their agents."""
     for profile in ROLE_PROFILES:
         store.upsert_role_profile(actor="system", **profile)
     for agent in DEFAULT_AGENTS:
