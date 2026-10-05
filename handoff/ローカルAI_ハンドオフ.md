@@ -5,7 +5,7 @@
 - 工程: ローカルAI連携
 - 状態: 実装済み・**PCでの実機確認がまだ**
 - リポジトリ: `kaidoki-lab/second-brain`
-- ブランチ: `ccr-f7e80a17-g4gqvk`（**main にはまだ入っていない**）
+- ブランチ: `ccr-f7e80a17-g4gqvk` → **main にマージ済み**（PCは `update.bat` で反映）
 
 ---
 
@@ -59,15 +59,13 @@ README では「ローカルAI」が参加者として名前だけ載ってい�
 3. **ELYZA 版のモデル名 `hf.co/elyza/Llama-3-ELYZA-JP-8B-GGUF` で取得できるか未確認。**
 4. Ollama の `/api/create` には新しい形式（`from` + `system`）で送っている。古い Ollama
    （`modelfile` 文字列しか受け付けない版）だと失敗する可能性がある。そのときは Ollama を更新する。
-5. **`update.bat` では今回の変更は入らない。** `update.ps1` は `main` の ZIP を取得するが、
-   今回の作業は `ccr-f7e80a17-g4gqvk` ブランチにしかない。
-   （前の回答で「update.bat で反映される」と書いたのは誤り。）
+5. `update.ps1` が取得するのは `main` の ZIP だけ。今回の変更は main へマージ済みなので、
+   `update.bat` で反映される。
 
 ## 4. 次にやること
 
-### A. 変更をPCに入れる（どちらか一方）
-- GitHub でこのブランチから main への PR を作ってマージし、そのあと `update.bat`（いちばん簡単）
-- または `git fetch origin ccr-f7e80a17-g4gqvk && git checkout ccr-f7e80a17-g4gqvk`
+### A. 変更をPCに入れる
+- `update.bat` をダブルクリックする（main へはマージ済み）
 
 ### B. 実機で確認する
 1. `llama.bat llama3.2:3b` を実行する（まず軽いモデルで試す）
@@ -94,6 +92,6 @@ README では「ローカルAI」が参加者として名前だけ載ってい�
 
 ```
 second-brain リポジトリの handoff/ローカルAI_ハンドオフ.md を読んで続きをお願いします。
-ブランチは ccr-f7e80a17-g4gqvk です。まずこの変更を main に入れて、
+変更は main にマージ済みです。update.bat のあと、
 PCで llama.bat を試すところから手伝ってください。
 ```
