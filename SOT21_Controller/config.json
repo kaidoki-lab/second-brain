@@ -42,6 +42,20 @@
       "program": "C:\\KYOUKAI\\ShortFACTORY\\start.bat",
       "wait": false
     },
+    "youtube_make": {
+      "label": "YouTube 1本作る",
+      "program": "python",
+      "args": ["../youtube_studio/run.py", "auto"],
+      "cwd": "../youtube_studio",
+      "wait": false
+    },
+    "youtube_review": {
+      "label": "YouTube確認画面",
+      "program": "python",
+      "args": ["../youtube_studio/run.py", "review"],
+      "cwd": "../youtube_studio",
+      "wait": false
+    },
     "image_process": {
       "label": "画像処理",
       "program": "C:\\Tools\\image_process.bat",

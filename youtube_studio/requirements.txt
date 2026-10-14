@@ -1,0 +1,3 @@
+Pillow>=10
+# 台本を Claude に書かせるときだけ必要（既定のローカルAI＝Ollama なら不要）
+anthropic

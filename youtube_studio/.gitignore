@@ -1,0 +1,7 @@
+# 認証情報と作った動画はリポジトリに入れない
+secrets/*
+!secrets/.gitkeep
+episodes/*
+!episodes/.gitkeep
+channel.local.json
+logs/

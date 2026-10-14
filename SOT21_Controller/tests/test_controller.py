@@ -77,7 +77,7 @@ class PanelTest(unittest.TestCase):
                       "SECOND BRAIN"):
             self.assertIn(group, html)
         for label in ("メインPC状態確認", "OBS起動", "録画開始", "録画停止",
-                      "Python処理実行", "BAT実行", "ShortFACTORY実行",
+                      "Python処理実行", "BAT実行", "ShortFACTORY実行", "YouTube 1本作る", "YouTube確認画面",
                       "共有フォルダ確認", "Output確認", "Render確認",
                       "サブPC Wake-on-LAN", "サブPC接続確認"):
             self.assertIn(label, html)

@@ -1,11 +1,12 @@
 # SECOND BRAIN + SOT21 CONTROLLER
 
-連動する2つのシステム。どちらもこのリポジトリだけで完結する。
+連動する3つのシステム。どれもこのリポジトリだけで完結する。
 
 | ディレクトリ | 役割 | 依存 |
 | --- | --- | --- |
 | [`second_brain/`](second_brain/) | **第二の脳** — 複数AI（ChatGPT / Codex / Claude / Gemini / ローカルAI）へ、確定した事実は共有し思考方法は共有しないための中央管理層 | なし（Python標準ライブラリ + SQLite） |
 | [`SOT21_Controller/`](SOT21_Controller/) | **SOT21 LAN操作盤** — 旧Androidタブレットをブラウザだけの操作端末にし、処理はメインPC側で実行する | Flask / psutil |
+| [`youtube_studio/`](youtube_studio/) | **YouTube STUDIO** — AIが毎日1本（企画→台本→音声→動画）作り、人はスマホで承認するだけでチャンネルを回す | Pillow / ffmpeg / VOICEVOX（台本はローカルAIか Claude） |
 
 ```
    SOT21 (ブラウザ)                    ChatGPT / Codex / Claude / Gemini
@@ -15,7 +16,7 @@
    bat / Python / OBS / ファイル / サブPC制御
 ```
 
-2つは**隣同士のディレクトリのまま**使う。操作盤の既定設定が `../second_brain` を参照している。
+3つは**隣同士のディレクトリのまま**使う。操作盤の既定設定が `../second_brain` と `../youtube_studio` を参照している。
 
 ## 更新のしかた
 
@@ -44,6 +45,7 @@ python app.py               # http://<このPCのIP>:5000
 
 - [second_brain/README.md](second_brain/README.md) — API、ロールプロファイル、MCP設定、外部公開、ローカルAIの育て方
 - [SOT21_Controller/README.md](SOT21_Controller/README.md) — config.json、ボタン追加、SOT21側の設定
+- [youtube_studio/README.md](youtube_studio/README.md) — 収益化の条件と注意、はじめかた、YouTube API の設定、承認の流れ
 
 ## 設計の芯
 
@@ -58,4 +60,5 @@ python app.py               # http://<このPCのIP>:5000
 ```bash
 python -m unittest discover -s second_brain/tests -t second_brain/tests   # 192件
 cd SOT21_Controller && python -m unittest discover -s tests -t tests      # 44件
+cd youtube_studio && python -m unittest discover -s tests -t tests        # 33件
 ```

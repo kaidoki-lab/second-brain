@@ -1,6 +1,7 @@
 ﻿# 第二の脳 / SOT21操作盤 を最新版に更新する。
 # GitHubから最新のZIPを取得し、コードのフォルダだけ入れ替える。
 # データベース（~/.second_brain/brain.db）と config.json は触らない。
+# youtube_studio の channel.local.json・secrets・episodes はZIPに含まれないので残る。
 
 $ErrorActionPreference = 'Stop'
 
@@ -38,7 +39,7 @@ try {
     }
 
     Write-Host '[3/3] 入れ替え中...'
-    foreach ($name in @('second_brain', 'SOT21_Controller')) {
+    foreach ($name in @('second_brain', 'SOT21_Controller', 'youtube_studio')) {
         $from = Join-Path $src $name
         $to = Join-Path $root $name
         if (-not (Test-Path $from)) { continue }

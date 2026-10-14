@@ -67,7 +67,7 @@ python app.py
 | --- | --- | --- |
 | SYSTEM | メインPC状態確認 / サブPC状態確認 / 状態更新 | psutil と ping/TCP |
 | OBS | OBS起動 / 録画開始 / 録画停止 / OBS状態 | 起動は exe、録画は obs-websocket |
-| AUTOMATION | Python処理実行 / BAT実行 / ShortFACTORY実行 | config.json 登録済みのみ |
+| AUTOMATION | Python処理実行 / BAT実行 / ShortFACTORY実行 / YouTube 1本作る / YouTube確認画面 | config.json 登録済みのみ（YouTube は `../youtube_studio`） |
 | FILE | 共有フォルダ確認 / Output確認 / Render確認 | 件数・容量・最新5件・空き容量 |
 | PC CONTROL | サブPC Wake-on-LAN / サブPC接続確認 | マジックパケット / ping・TCP |
 | SECOND BRAIN | 企画の現在地 / 役割別コンテキスト / ハンドオフ確認 / 現フェーズ完了 / 第二の脳を開く・起動 | `../second_brain` のAPIを叩く |

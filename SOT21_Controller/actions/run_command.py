@@ -96,3 +96,15 @@ def run_bat(ctx, params: dict[str, Any]) -> Result:
         params={"command": "shortfactory"}, confirm=True)
 def run_shortfactory(ctx, params: dict[str, Any]) -> Result:
     return execute(ctx, params.get("command", "shortfactory"))
+
+
+@action("youtube_make", "YouTube 1本作る", "AUTOMATION",
+        params={"command": "youtube_make"}, confirm=True)
+def youtube_make(ctx, params: dict[str, Any]) -> Result:
+    return execute(ctx, params.get("command", "youtube_make"))
+
+
+@action("youtube_review", "YouTube確認画面", "AUTOMATION",
+        params={"command": "youtube_review"})
+def youtube_review(ctx, params: dict[str, Any]) -> Result:
+    return execute(ctx, params.get("command", "youtube_review"))
