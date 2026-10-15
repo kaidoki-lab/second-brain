@@ -63,6 +63,39 @@ SOT21 操作盤の AUTOMATION にも「YouTube 1本作る」「YouTube確認画�
 
 キャラクターを統一すると「このチャンネルの顔」になり、量産型の動画と見分けてもらいやすくなります。
 
+## ウソはどれだ（クイズ形式）
+
+`format.mode` を `"quiz"` にすると、毎回 **縦型ショート1本** を作ります。
+
+1. 前回の答え合わせ（ウソの正体と、コメントで正解した人の名前）
+2. 出演キャラのあいさつ
+3. A・B・C の雑学（1つだけウソ。並び順は機械でシャッフル）
+4. 「ウソだと思う記号をコメントで」
+
+- **答え合わせはAIに書かせません。** コメントを集計した結果（1人1回目の回答だけ数える）を、そのまま文と画面に入れます。
+  「#名前NG」と書いた人の名前は読みません。コメントの取り込みには `run.py auth` か `api_key` + `channel_id` が必要で、
+  無いときは答えだけ発表します
+- 答え合わせが前回とずれないよう、**前の回が公開されるまで次の回は作りません**（手動投稿なら、確認画面で公開URLを記録すると次へ進みます）
+- 承認画面の一番上に **答えと出典** が出ます（動画には答えは出ません）
+- ウソは無害な題材に限るよう台本に指示し、さらに「切り抜かれて広まっても害がないか」を確認項目の先頭に必ず入れます
+
+### 出演キャラ（PUPPET-AVATAR）
+
+`cast.source` に PUPPET-AVATAR の `characters` フォルダ、`cast.members` に出すキャラを書くと、
+**毎回キャラを入れ替えて**（直前と同じキャラは出さず、出番の少ないキャラから）出演させます。
+
+- キャラの絵は **読むだけ** です。`base.png` に `jaw.png`（下あご）を下へずらして重ね、
+  口の3段階の画像を `episodes/_cast/<id>/` に作ります（元の絵が変わったときだけ作り直す）
+- キャラごとに VOICEVOX の声（`speaker`）・クレジット（`credit`）・口調（`persona`）・概要欄のリンク（`link`）を持てます
+- 確認画面の一覧に **キャラ別の反応**（公開本数・平均再生・コメント数）が出ます
+
+このチャンネル用の設定は `presets/uso_quiz.json` にあります。
+
+```bash
+python run.py preset uso_quiz   # channel.local.json に重ねる
+python run.py check             # キャラの絵と声（話者番号）も確かめる
+```
+
 ## 承認したあとの投稿
 
 | `youtube.upload` | 承認ボタンを押すと | 準備 |
@@ -106,6 +139,7 @@ SOT21 操作盤の AUTOMATION にも「YouTube 1本作る」「YouTube確認画�
 
 ```bash
 python run.py setup        # チャンネル設定（対話）
+python run.py preset uso_quiz  # presets/ の設定を channel.local.json に重ねる
 python run.py check        # 準備の確認
 python run.py auto         # 再生数 → 企画 → 1本（毎日の自動実行と同じ）
 python run.py review       # 確認画面
@@ -120,13 +154,15 @@ python run.py auth / stats # YouTube 認証 / 再生数の取り込み
 
 ```
 youtube_studio/
-  run.py  channel.json  *.bat
+  run.py  channel.json  *.bat  presets/
   studio/
     pipeline.py  流れ全体（企画→台本→音声→動画→確認待ち→承認→投稿、振り返り）
     writer.py    企画・台本（Ollama / Claude）。JSONで受け取り、形を検査して1回だけ書き直させる
     voice.py     VOICEVOX。文ごとに音声を作り、長さで字幕を合わせる
     render.py    Pillow で画面、ffmpeg で mp4。本編・ショート・サムネ
     avatar.py    パペットアバター。音量で口の3段階を決め、瞬きと一緒に動画へ重ねる
+    quiz.py      ウソはどれだ。3択の台本・並び順・コメントの採点・答え合わせ
+    cast.py      出演キャラ。PUPPET-AVATAR の絵の取り込み・入れ替え・キャラ別の反応
     review.py    確認画面（標準ライブラリの http.server、LAN内のみ、動画のシーク対応）
     youtube.py   OAuth・再開可能アップロード・サムネ・再生数（urllib のみ）
     brain.py     第二の脳とのつなぎ（任意）
@@ -141,7 +177,7 @@ youtube_studio/
 
 ```bash
 cd youtube_studio
-python -m unittest discover -s tests -t tests   # 41件（ffmpeg と日本語フォントが必要）
+python -m unittest discover -s tests -t tests   # 60件（ffmpeg と日本語フォントが必要）
 ```
 
 AI・VOICEVOX・YouTube は偽物に差し替え、ffmpeg は本物で mp4 を作って長さと解像度を確かめます。

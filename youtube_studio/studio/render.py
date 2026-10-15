@@ -23,6 +23,7 @@ from .config import path as cfg_path
 from .voice import concat
 
 GAP = 0.25  # 文と文の間の無音（voice.concat と同じ値）
+QUIZ_CARDS_TOP = 240  # クイズ画面の札の上端（幅1080基準。avatar.layout と合わせる）
 
 FONT_CANDIDATES = [
     # Windows
@@ -153,6 +154,81 @@ class Painter:
                       font=name_font, fill=(148, 163, 184))
         return img
 
+    def quiz_slide(self, size: tuple[int, int], heading: str, cards: list[dict[str, str]],
+                   caption: str, progress: float, mark: str = "",
+                   names: list[str] | None = None) -> Image.Image:
+        """「ウソはどれだ」の縦型画面。上に A/B/C の札、真ん中にキャラ、下に字幕。
+
+        mark: 答え合わせで「ウソ」の印をつける記号。アバターは avatar.layout の
+        quiz 配置（札と字幕の間）に重なる。
+        """
+        w, h = size
+        unit = w / 1080
+        img = Image.new("RGB", size, self.bg)
+        draw = ImageDraw.Draw(img)
+        margin = int(60 * unit)
+
+        hf = self.font(int(84 * unit))
+        hw = draw.textlength(heading, font=hf)
+        draw.text(((w - hw) / 2, int(110 * unit)), heading, font=hf, fill=self.accent,
+                  stroke_width=int(4 * unit), stroke_fill=(0, 0, 0))
+
+        y = QUIZ_CARDS_TOP * unit
+        card_h = int(150 * unit)
+        for card in cards:
+            lie = card["letter"] == mark
+            edge = (239, 68, 68) if lie else self.accent
+            draw.rounded_rectangle([margin, y, w - margin, y + card_h], int(24 * unit),
+                                   fill=(255, 255, 255), outline=edge, width=int(6 * unit))
+            badge = int(100 * unit)
+            bx, by = margin + int(24 * unit), y + (card_h - badge) // 2
+            draw.ellipse([bx, by, bx + badge, by + badge], fill=edge)
+            lf = self.font(int(64 * unit))
+            lw = draw.textlength(card["letter"], font=lf)
+            draw.text((bx + (badge - lw) / 2, by + int(8 * unit)), card["letter"], font=lf,
+                      fill=(255, 255, 255))
+            tx = bx + badge + int(28 * unit)
+            size_t = int(46 * unit)
+            n = len(wrap(draw, card["text"], self.font(size_t),
+                         w - margin - tx - int(20 * unit))[:2])
+            ty = y + (card_h - int(size_t * 1.3) * n) // 2 - int(4 * unit)
+            self._block(draw, (tx, ty), card["text"], size_t,
+                        (15, 23, 42), w - margin - tx - int(20 * unit), 2, 1.3)
+            if lie:
+                sf = self.font(int(56 * unit))
+                stamp = "ウソ"
+                sw = draw.textlength(stamp, font=sf)
+                draw.text((w - margin - sw - int(16 * unit), y - int(40 * unit)), stamp,
+                          font=sf, fill=(239, 68, 68), stroke_width=int(5 * unit),
+                          stroke_fill=(255, 255, 255))
+            y += card_h + int(24 * unit)
+
+        if names:
+            line = "正解: " + "・".join(names)
+            self._block(draw, (margin, y + int(10 * unit)), line, int(44 * unit),
+                        self.fg, w - margin * 2, 2)
+
+        if caption:
+            cap_size = int(62 * unit)
+            lines = wrap(draw, caption, self.font(cap_size), w - margin * 2)[:3]
+            band_h = int(cap_size * 1.4 * len(lines) + 60 * unit)
+            band_top = h - band_h - int(150 * unit)
+            draw.rectangle([0, band_top, w, band_top + band_h], fill=(0, 0, 0))
+            cy = band_top + int(30 * unit)
+            for line in lines:
+                lw = draw.textlength(line, font=self.font(cap_size))
+                draw.text(((w - lw) / 2, cy), line, font=self.font(cap_size),
+                          fill=(255, 255, 255))
+                cy += int(cap_size * 1.4)
+
+        draw.rectangle([0, h - int(10 * unit), int(w * progress), h], fill=self.accent)
+        if self.channel:
+            name_font = self.font(int(30 * unit))
+            nw = draw.textlength(self.channel, font=name_font)
+            draw.text((w - margin - nw, int(40 * unit)), self.channel,
+                      font=name_font, fill=(148, 163, 184))
+        return img
+
     def thumbnail(self, text: str, sub: str = "") -> Image.Image:
         w, h = 1280, 720
         img = Image.new("RGB", (w, h), self.bg)
@@ -189,8 +265,13 @@ def write_frames(painter: Painter, timeline: list[dict[str, Any]], size: tuple[i
     for i, item in enumerate(timeline):
         elapsed += item["duration"] + GAP
         frame = folder / f"{i:04d}.png"
-        painter.slide(size, item["heading"], item.get("points", []), item["text"],
-                      elapsed / total, reserve, reserve_left).save(frame)
+        if "cards" in item:
+            painter.quiz_slide(size, item["heading"], item["cards"], item["text"],
+                               elapsed / total, item.get("mark", ""),
+                               item.get("names")).save(frame)
+        else:
+            painter.slide(size, item["heading"], item.get("points", []), item["text"],
+                          elapsed / total, reserve, reserve_left).save(frame)
         listing.append(f"file '{frame.name}'\nduration {item['duration'] + GAP:.3f}")
     # concat は最後の1枚の時間を無視するので、最後をもう一度書く
     listing.append(f"file '{frame.name}'")

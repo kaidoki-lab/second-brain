@@ -218,6 +218,27 @@ class YouTube:
         self._call("POST", f"{UPLOAD}/thumbnails/set?videoId={video_id}", image.read_bytes(),
                    {"Content-Type": "image/png"})
 
+    # ---------------------------------------------------------- コメント
+
+    def comments(self, video_id: str, pages: int = 5) -> list[dict[str, Any]]:
+        """動画のコメント（返信を除く最上位のみ。古い順に並べ替えて返す）。読み取りだけ。"""
+        out: list[dict[str, Any]] = []
+        params = {"part": "snippet", "videoId": video_id, "maxResults": "100",
+                  "textFormat": "plainText", "order": "time"}
+        for _ in range(pages):
+            data = self._get("commentThreads", params)
+            for item in data.get("items", []):
+                s = item["snippet"]["topLevelComment"]["snippet"]
+                out.append({"author": s.get("authorDisplayName", ""),
+                            "channel": (s.get("authorChannelId") or {}).get("value", ""),
+                            "text": s.get("textOriginal") or s.get("textDisplay", ""),
+                            "at": s.get("publishedAt", "")})
+            token = data.get("nextPageToken")
+            if not token:
+                break
+            params = {**params, "pageToken": token}
+        return sorted(out, key=lambda c: c["at"])
+
     # ---------------------------------------------------------- 再生数
 
     def channel_videos(self, limit: int = 50) -> list[dict[str, Any]]:

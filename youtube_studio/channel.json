@@ -16,7 +16,8 @@
   "format": {
     "long_minutes": 8,
     "shorts": true,
-    "plan_batch": 5
+    "plan_batch": 5,
+    "mode": "explainer"
   },
   "writer": {
     "backend": "ollama",
@@ -47,6 +48,15 @@
     "dir": "",
     "color": "#f97316",
     "position": "right"
+  },
+  "cast": {
+    "source": "",
+    "members": []
+  },
+  "quiz": {
+    "heading": "ウソはどれだ？",
+    "call": "",
+    "footer": ""
   },
   "youtube": {
     "upload": "manual",

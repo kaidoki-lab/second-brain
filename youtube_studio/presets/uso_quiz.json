@@ -1,0 +1,52 @@
+{
+  "channel": {
+    "name": "ウソつき人形劇場",
+    "url": "https://www.youtube.com/@atarutv-j1v",
+    "theme": "人形や妖怪が毎回3つの雑学を話し、1つだけ混ざったウソを視聴者がコメントで当てる雑学クイズ",
+    "audience": "すき間時間に雑学クイズで遊びたい人。年齢は問わない",
+    "promise": "毎回1分以内で、意外な本当の雑学を2つ覚えられて、ウソ当てで遊べる",
+    "tone": "短くテンポよく。怖がらせすぎない。キャラの口調はあいさつだけ",
+    "forbidden": [
+      "健康・医療・お金・災害・事件・政治・宗教をウソの題材にすること",
+      "実在の人物・企業・地域を題材にしたウソ",
+      "チャンネル登録・高評価・コメントを参加やプレゼントの条件にすること",
+      "抽選・現金配布・プレゼント",
+      "他人の動画・画像・音声の転載"
+    ]
+  },
+  "format": {
+    "mode": "quiz",
+    "shorts": true,
+    "plan_batch": 5
+  },
+  "avatar": {
+    "enabled": true
+  },
+  "cast": {
+    "source": "C:/Users/pc/Desktop/PUPPET-AVATAR/characters",
+    "members": [
+      {"id": "puppet", "name": "腹話術人形", "speaker": 11, "credit": "VOICEVOX:玄野武宏",
+       "persona": "古い舞台の司会者。ていねいで芝居がかった口調",
+       "link": "https://voidscan.booth.pm/items/8822479"},
+      {"id": "ichimatsu", "name": "市松人形", "speaker": 14, "credit": "VOICEVOX:冥鳴ひまり",
+       "persona": "静かでおっとり。少しだけ不気味な間をとる",
+       "link": "https://voidscan.booth.pm/items/8822479"},
+      {"id": "tinrobot", "name": "ブリキロボ", "speaker": 47, "credit": "VOICEVOX:ナースロボ＿タイプＴ",
+       "persona": "古いロボット。言い切り口調で、語尾に「デス」",
+       "link": "https://voidscan.booth.pm/items/8822479"},
+      {"id": "dokuro", "name": "がしゃどくろ", "speaker": 13, "credit": "VOICEVOX:青山龍星",
+       "persona": "大きな骸骨の妖怪。低くゆったり、豪快に笑う",
+       "link": "https://voidscan.booth.pm/"},
+      {"id": "hannnya", "name": "般若", "speaker": 2, "credit": "VOICEVOX:四国めたん",
+       "persona": "上品な丁寧語。にこやかだが少し怖い",
+       "link": "https://voidscan.booth.pm/"},
+      {"id": "nurarihyonn", "name": "ぬらりひょん", "speaker": 42, "credit": "VOICEVOX:ちび式じい",
+       "persona": "とぼけた老人の妖怪。のんびりした語り口",
+       "link": "https://voidscan.booth.pm/"}
+    ]
+  },
+  "quiz": {
+    "heading": "ウソはどれだ？",
+    "footer": "出演キャラはOBSで使えるパペットアバターとして販売しています。"
+  }
+}

@@ -9,6 +9,10 @@
       確認画面で見る → 承認（予約投稿）か、理由を書いて見送り
 
 確認待ちが溜まっているときは新しく作らない（見られない動画を量産しない）。
+
+format.mode = "quiz"（ウソはどれだ）のときは、出演キャラを毎回入れ替え、
+前回の答え合わせを次の回の冒頭に入れる。答え合わせが前回とずれないよう、
+前の回が公開されるまで次の回は作らない。
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import brain
+from . import brain, cast, quiz
 from .config import path as cfg_path, require_channel
 from .episode import (APPROVED, IN_PROGRESS, PLANNED, PUBLISHED, REJECTED, REVIEW,
                       SCRIPTED, VOICED, Episode, Library, now)
@@ -83,23 +87,87 @@ class Studio:
     # ---------------------------------------------------------- 制作
 
     def write(self, ep: Episode) -> Episode:
+        if quiz.enabled(self.cfg):
+            return self.write_quiz(ep)
         script = write_script(self.llm, self.cfg, ep.data["topic"], self.library.memory(),
                               self.made_titles(), brain.context(self.cfg))
         return ep.set(SCRIPTED, script=script)
 
-    def _timeline(self, items: list[tuple[str, list[str], str]], prefix: str,
-                  folder: Path, limit: float | None = None) -> list[dict[str, Any]]:
+    def write_quiz(self, ep: Episode) -> Episode:
+        member = cast.pick(self.cfg, self.library.all()) if cast.enabled(self.cfg) else None
+        script = quiz.write(self.llm, self.cfg, ep.data["topic"], self.library.memory(),
+                            self.made_titles(), brain.context(self.cfg), member)
+        prev = self.last_unrevealed()
+        if prev is not None:
+            script["recap"] = quiz.recap(prev.data["script"], self.collect_answers(prev))
+            script["recap"]["from"] = prev.id
+            prev.set(revealed_in=ep.id)
+        fields: dict[str, Any] = {"script": script}
+        if member:
+            fields.update(cast=member["id"], cast_at=now())
+        return ep.set(SCRIPTED, **fields)
+
+    def last_unrevealed(self) -> Episode | None:
+        """まだ答え合わせしていない、いちばん新しい公開済みのクイズ回。"""
+        done = [ep for ep in self.library.by_status(PUBLISHED)
+                if (ep.data.get("script") or {}).get("format") == "quiz"]
+        done.sort(key=lambda ep: ep.data.get("published_at", ""))
+        if not done or done[-1].data.get("revealed_in"):
+            return None
+        return done[-1]
+
+    def collect_answers(self, ep: Episode) -> dict[str, Any] | None:
+        """コメントから回答を集めて採点する。取れなければ None（答えだけ発表する）。"""
+        ids = cast.video_ids(ep)
+        if not ids or not self.youtube_ready(self.cfg["youtube"]):
+            return None
+        try:
+            comments = self.youtube.comments(ids[0])
+        except Exception as exc:
+            ep.set(comments_error=str(exc))
+            return None
+        result = quiz.judge(comments, ep.data["script"]["answer"])
+        memory = self.library.memory()
+        quiz.update_ranking(memory, result["winners"])
+        self.library.save_memory(memory)
+        ep.set(results=result)
+        return result
+
+    def ep_cfg(self, ep: Episode) -> dict[str, Any]:
+        """その回の設定（出演キャラがいれば、絵と声をそのキャラに差し替える）。"""
+        if ep.data.get("cast"):
+            return cast.cfg_for(self.cfg, ep.data["cast"])
+        return self.cfg
+
+    def voice_for(self, cfg: dict[str, Any]) -> VoiceVox:
+        base = self.voice
+        speaker = int(cfg["voice"].get("speaker", base.speaker))
+        if speaker == base.speaker:
+            return base
+        return VoiceVox(base.url, speaker, base.speed, base.transport)
+
+    def _timeline(self, items: list[tuple[str, list[str], str]] | list[dict[str, Any]],
+                  prefix: str, folder: Path, limit: float | None = None,
+                  voice: VoiceVox | None = None) -> list[dict[str, Any]]:
+        """items は (見出し, 要点, 文) か、画面の内容と "text" を持つ dict。"""
+        voice = voice or self.voice
         timeline: list[dict[str, Any]] = []
         total = 0.0
-        for heading, points, text in items:
+        for item in items:
+            if isinstance(item, dict):
+                screen = {k: v for k, v in item.items() if k != "text"}
+                text = item["text"]
+            else:
+                heading, points, text = item
+                screen = {"heading": heading, "points": points}
             for sentence in split_sentences(text):
-                wav = self.voice.synth(sentence)
+                wav = voice.synth(sentence)
                 length = duration(wav)
                 if limit is not None and total + length > limit:
                     return timeline
                 name = f"{prefix}_{len(timeline):03d}.wav"
                 (folder / name).write_bytes(wav)
-                timeline.append({"heading": heading, "points": points, "text": sentence,
+                timeline.append({**screen, "text": sentence,
                                  "audio": name, "duration": round(length, 3)})
                 total += length + 0.25
         return timeline
@@ -108,6 +176,14 @@ class Studio:
         script = ep.data["script"]
         folder = ep.file("voice")
         folder.mkdir(exist_ok=True)
+        if script.get("format") == "quiz":
+            ecfg = self.ep_cfg(ep)
+            short = self._timeline(quiz.timeline_items(script, ecfg), "short", folder,
+                                   voice=self.voice_for(ecfg))
+            ep.file("timeline.json").write_text(
+                json.dumps({"short": short}, ensure_ascii=False, indent=1), encoding="utf-8")
+            seconds = sum(t["duration"] + 0.25 for t in short)
+            return ep.set(VOICED, short_seconds=round(seconds, 1))
         headings = [s["heading"] for s in script["sections"]]
         long_items = [(script["title"], [], script["hook"])]
         long_items += [(s["heading"], s.get("points", []), s["narration"])
@@ -130,6 +206,13 @@ class Studio:
         r = self.cfg["render"]
         w, h = int(r.get("width", 1920)), int(r.get("height", 1080))
         voice_dir = ep.file("voice")
+        if ep.data["script"].get("format") == "quiz":
+            # ショートだけ（縦型。答えが出る本編は作らない）
+            render(self.ep_cfg(ep), timeline["short"], voice_dir, ep.file("short.mp4"),
+                   (min(w, h), max(w, h)), ep.file("frames_short"))
+            _clear(ep.file("frames_short"))
+            return ep.set(REVIEW, outputs=["short.mp4"], review_since=now(),
+                          final=self.default_meta(ep))
         render(self.cfg, timeline["long"], voice_dir, ep.file("long.mp4"), (w, h),
                ep.file("frames_long"))
         outputs = ["long.mp4"]
@@ -154,11 +237,17 @@ class Studio:
             ep = steps[ep.status](ep)
         return ep
 
+    def waiting_for_publish(self) -> bool:
+        """クイズで、前の回がまだ公開されていない（答え合わせがずれるので次を作らない）。"""
+        return quiz.enabled(self.cfg) and bool(self.library.by_status(REVIEW, APPROVED))
+
     def make(self, count: int = 1) -> list[Episode]:
         require_channel(self.cfg)
         made = []
         for _ in range(count):
             if len(self.library.by_status(REVIEW)) >= MAX_PENDING_REVIEW:
+                break
+            if self.waiting_for_publish():
                 break
             queue = self.library.by_status(*IN_PROGRESS)
             if not queue:
@@ -185,8 +274,13 @@ class Studio:
 
     def default_meta(self, ep: Episode) -> dict[str, Any]:
         script = ep.data["script"]
+        if script.get("format") == "quiz":
+            member = cast.member(self.cfg, ep.data["cast"]) if ep.data.get("cast") else None
+            desc = quiz.description(script, self.ep_cfg(ep), member)
+        else:
+            desc = self.description(script)
         # 公開日時は承認したときに空き枠から決める（確認待ちが複数あっても重ならない）
-        return {"title": script["title"], "description": self.description(script),
+        return {"title": script["title"], "description": desc,
                 "tags": script.get("tags", [])}
 
     def next_slot(self) -> str:
@@ -232,6 +326,14 @@ class Studio:
     def _upload(self, ep: Episode) -> Episode:
         meta = ep.data["final"]
         when = _utc(meta.get("publish_at", ""))
+        if not ep.file("long.mp4").exists():   # ショートだけの回（クイズ）
+            short_meta = {**meta, "title": meta["title"][:90] + " #Shorts"}
+            video_id = self.youtube.upload(ep.file("short.mp4"), short_meta, when)
+            url = f"https://youtube.com/shorts/{video_id}"
+            brain.record_published(self.cfg, meta["title"], url)
+            ep.data.pop("error", None)
+            return ep.set(PUBLISHED, published={"video_id": video_id, "url": url},
+                          published_at=now())
         video_id = self.youtube.upload(ep.file("long.mp4"), meta, when)
         result: dict[str, Any] = {"video_id": video_id,
                                   "url": f"https://youtu.be/{video_id}"}
@@ -289,6 +391,10 @@ class Studio:
         pending = len(self.library.by_status(REVIEW))
         if pending >= MAX_PENDING_REVIEW:
             report.append(f"確認待ちが{pending}本あるので、今日は作りません")
+            return report
+        if self.waiting_for_publish():
+            report.append("前の回がまだ公開されていないので、今日は作りません"
+                          "（答え合わせがずれないように。公開したらURLを記録してください）")
             return report
         for ep in self.make(1):
             report.append(f"確認待ちに追加: {ep.data['script']['title']}")

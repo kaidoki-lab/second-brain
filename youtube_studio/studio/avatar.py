@@ -186,6 +186,10 @@ def write_stream(cfg: dict[str, Any], narration: bytes, fps: int, size: int,
 def layout(size: tuple[int, int], cfg: dict[str, Any]) -> tuple[int, int, int]:
     """アバターの (大きさ, x, y)。横型は右側、縦型は中央。"""
     w, h = size
+    if h > w and cfg.get("format", {}).get("mode") == "quiz":
+        # クイズ: 上の札（3枚と正解者の行）と下の字幕の帯（3行まで）の間
+        s = int(w * 0.62)
+        return s, (w - s) // 2, int(h * 0.40)
     if h > w:   # ショート
         s = int(w * 0.5)   # 見出しと字幕の帯の間に収める
         return s, (w - s) // 2, int(h * 0.30)

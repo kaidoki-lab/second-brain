@@ -17,7 +17,7 @@ import urllib.request
 import webbrowser
 from typing import Any
 
-from . import config
+from . import cast, config
 from .episode import LABELS
 from .pipeline import Studio
 
@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="run.py", description="YouTube チャンネル運営の自動化")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("setup", help="チャンネルのテーマ等を対話で設定する")
+    sp0 = sub.add_parser("preset", help="presets/ の設定を channel.local.json に重ねる")
+    sp0.add_argument("name", help="例: uso_quiz")
     sub.add_parser("check", help="必要なもの（AI・VOICEVOX・ffmpeg・フォント）がそろっているか")
     sp = sub.add_parser("plan", help="企画を足す")
     sp.add_argument("-n", type=int, default=0)
@@ -114,6 +116,15 @@ def check(cfg: dict[str, Any]) -> int:
                  f"{model} がありません。入っているモデル: {', '.join(names) or 'なし'}")
         except OSError as exc:
             line(False, "ローカルAI（Ollama）", f"起動していません（{exc}）")
+    if cast.enabled(cfg):
+        for m in cast.members(cfg):
+            label = f"出演キャラ {m.get('name', m['id'])}"
+            try:
+                cast.sprite_dir(cfg, m["id"])
+                make_voice(cast.cfg_for(cfg, m["id"])).synth("テスト")
+                line(True, label, f"声 {m.get('speaker')}")
+            except (cast.CastError, VoiceError, OSError) as exc:
+                line(False, label, str(exc))
     y = cfg["youtube"]
     studio = Studio(cfg)
     line(True, "YouTube への投稿方法", "承認画面から手動で貼る（manual）" if y.get("upload") != "api"
@@ -144,6 +155,13 @@ def main(argv: list[str] | None = None) -> int:
             return setup(cfg)
         if args.cmd == "check":
             return check(cfg)
+        if args.cmd == "preset":
+            preset = config.BASE / "presets" / f"{args.name}.json"
+            if not preset.exists():
+                raise config.ConfigError(f"{preset.name} がありません")
+            saved = config.save_local(json.loads(preset.read_text(encoding="utf-8")))
+            print(f"{preset.name} を {saved} に重ねました。次は `python run.py check`")
+            return 0
         studio = Studio(cfg)
         if args.cmd == "plan":
             for ep in studio.plan(args.n or None):

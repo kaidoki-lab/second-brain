@@ -18,6 +18,7 @@ from typing import Any
 
 from .episode import (APPROVED, IN_PROGRESS, LABELS, PUBLISHED, REJECTED, REVIEW,
                       Episode)
+from . import cast
 from .pipeline import Studio
 
 MEDIA = {"long.mp4": "video/mp4", "short.mp4": "video/mp4", "thumbnail.png": "image/png"}
@@ -90,6 +91,13 @@ def index_html(studio: Studio) -> bytes:
         total = sum(s.get("views", 0) for s in memory["stats"].values())
         body.append(f"<p class='muted'>総再生 {total:,} 回・{len(memory['stats'])}本"
                     f"（{esc(memory['stats_at'][:16])} 時点）</p>")
+    if cast.enabled(cfg):
+        rows = cast.report(cfg, episodes, memory.get("stats", {}))
+        body.append("<h2>キャラ別の反応（平均再生の多い順）</h2><div class='card'><table>"
+                    "<tr><th>キャラ</th><th>公開</th><th>平均再生</th><th>コメント</th></tr>"
+                    + "".join(f"<tr><td>{esc(r['name'])}</td><td>{r['published']}</td>"
+                              f"<td>{r['avg_views']:,}</td><td>{r['comments']:,}</td></tr>"
+                              for r in rows) + "</table></div>")
     for label, statuses in groups:
         items = [ep for ep in reversed(episodes) if ep.status in statuses]
         if not items:
@@ -108,6 +116,23 @@ def index_html(studio: Studio) -> bytes:
     return page("YouTube STUDIO", "".join(body))
 
 
+def quiz_html(script: dict[str, Any]) -> str:
+    """答えと出典（承認する人だけが見る。動画には答えは出ない）。"""
+    rows = "".join(
+        f"<li><strong>{esc(i['letter'])}{'（ウソ）' if i['lie'] else ''}</strong> "
+        f"{esc(i['text'])}<br><span class='muted'>{esc(i['explain'])}"
+        f"{'／出典: ' + esc(i['source']) if i.get('source') else ''}</span></li>"
+        for i in script.get("items", []))
+    out = f"<h2>答え: {esc(script.get('answer', ''))}</h2><ul class='checks'>{rows}</ul>"
+    r = script.get("recap")
+    if r:
+        got = ("コメント未取得（答えだけ発表）" if r.get("correct") is None
+               else f"回答{r['answers']}人・正解{r['correct']}人")
+        out += (f"<div class='card'><strong>冒頭の答え合わせ</strong>（{esc(got)}）<br>"
+                f"{esc(r['text'])}</div>")
+    return out
+
+
 def episode_html(studio: Studio, ep: Episode, message: str = "") -> bytes:
     script = ep.data.get("script") or {}
     final = ep.data.get("final") or {}
@@ -116,6 +141,14 @@ def episode_html(studio: Studio, ep: Episode, message: str = "") -> bytes:
             f"<span class='badge'>{esc(LABELS.get(ep.status, ep.status))}</span>"]
     if message:
         body.append(f"<div class='card'>{esc(message)}</div>")
+    if ep.data.get("cast"):
+        try:
+            who = cast.member(studio.cfg, ep.data["cast"]).get("name", ep.data["cast"])
+        except cast.CastError:
+            who = ep.data["cast"]
+        body.append(f" <span class='badge'>出演: {esc(who)}</span>")
+    if script.get("format") == "quiz":
+        body.append(quiz_html(script))
     outputs = ep.data.get("outputs", [])
     if "long.mp4" in outputs:
         mins = ep.data.get("long_seconds", 0) / 60
@@ -161,7 +194,7 @@ def episode_html(studio: Studio, ep: Episode, message: str = "") -> bytes:
     elif ep.status == APPROVED:
         body.append(f"""
 <h2>YouTube Studio に貼る内容</h2>
-<p class='muted'>YouTube Studio で本編をアップロードし、下をコピーして貼ってください。
+<p class='muted'>YouTube Studio で動画（ショートだけの回はショート）をアップロードし、下をコピーして貼ってください。
 公開日時 {esc(final.get('publish_at', ''))} で予約するのがおすすめです。</p>
 <label>タイトル</label><input id='t' readonly value='{esc(final.get('title', ''))}'>
 <button class='copy' data-copy='t'>コピー</button>
@@ -181,7 +214,7 @@ def episode_html(studio: Studio, ep: Episode, message: str = "") -> bytes:
     elif ep.status == REJECTED:
         body.append(f"<div class='card'>見送り理由: {esc(ep.data.get('reject_reason', ''))}</div>")
 
-    if script:
+    if script.get("sections"):
         sections = "".join(
             f"<h3>{esc(s['heading'])}</h3><p>{esc(s['narration'])}</p>"
             for s in script.get("sections", []))
