@@ -18,6 +18,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from . import avatar
 from .config import path as cfg_path
 from .voice import concat
 
@@ -102,29 +103,33 @@ class Painter:
         return y
 
     def slide(self, size: tuple[int, int], heading: str, points: list[str],
-              caption: str, progress: float) -> Image.Image:
+              caption: str, progress: float, reserve: int = 0,
+              reserve_left: bool = False) -> Image.Image:
+        """reserve: アバターを置くために空けておく横幅（横型のみ）。"""
         w, h = size
         vertical = h > w
         unit = w / 1920 if not vertical else w / 1080
         img = Image.new("RGB", size, self.bg)
         draw = ImageDraw.Draw(img)
         margin = int(90 * unit)
+        x0 = margin + (reserve if reserve_left else 0)
+        text_w = w - margin * 2 - reserve
         top = int((260 if vertical else 80) * unit)
 
         # 見出し
-        draw.rectangle([margin, top, margin + int(14 * unit), top + int(84 * unit)],
+        draw.rectangle([x0, top, x0 + int(14 * unit), top + int(84 * unit)],
                        fill=self.accent)
-        y = self._block(draw, (margin + int(40 * unit), top), heading,
+        y = self._block(draw, (x0 + int(40 * unit), top), heading,
                         int((84 if vertical else 72) * unit), self.fg,
-                        w - margin * 2 - int(40 * unit), 3 if vertical else 2)
+                        text_w - int(40 * unit), 3 if vertical else 2)
         y += int(40 * unit)
 
         # 要点
         for point in points:
-            draw.ellipse([margin + int(10 * unit), y + int(24 * unit),
-                          margin + int(34 * unit), y + int(48 * unit)], fill=self.accent)
-            y = self._block(draw, (margin + int(60 * unit), y), point, int(56 * unit),
-                            self.fg, w - margin * 2 - int(60 * unit), 2) + int(18 * unit)
+            draw.ellipse([x0 + int(10 * unit), y + int(24 * unit),
+                          x0 + int(34 * unit), y + int(48 * unit)], fill=self.accent)
+            y = self._block(draw, (x0 + int(60 * unit), y), point, int(56 * unit),
+                            self.fg, text_w - int(60 * unit), 2) + int(18 * unit)
 
         # 字幕（いま読んでいる文）
         if caption:
@@ -175,7 +180,7 @@ class Painter:
 # ================================================================== 組み立て
 
 def write_frames(painter: Painter, timeline: list[dict[str, Any]], size: tuple[int, int],
-                 folder: Path) -> Path:
+                 folder: Path, reserve: int = 0, reserve_left: bool = False) -> Path:
     """文ごとの画像と、ffmpeg 用の表示時間リストを書き出す。"""
     folder.mkdir(parents=True, exist_ok=True)
     total = sum(t["duration"] + GAP for t in timeline) or 1.0
@@ -185,7 +190,7 @@ def write_frames(painter: Painter, timeline: list[dict[str, Any]], size: tuple[i
         elapsed += item["duration"] + GAP
         frame = folder / f"{i:04d}.png"
         painter.slide(size, item["heading"], item.get("points", []), item["text"],
-                      elapsed / total).save(frame)
+                      elapsed / total, reserve, reserve_left).save(frame)
         listing.append(f"file '{frame.name}'\nduration {item['duration'] + GAP:.3f}")
     # concat は最後の1枚の時間を無視するので、最後をもう一度書く
     listing.append(f"file '{frame.name}'")
@@ -200,25 +205,42 @@ def render(cfg: dict[str, Any], timeline: list[dict[str, Any]], voice_dir: Path,
         raise RenderError("台本が空です")
     ffmpeg = find_ffmpeg()
     painter = Painter(cfg)
-    concat_list = write_frames(painter, timeline, size, work)
-    narration = work / "narration.wav"
-    narration.write_bytes(concat([(voice_dir / t["audio"]).read_bytes() for t in timeline], GAP))
-
     fps = int(cfg["render"].get("fps", 30))
+    narration_bytes = concat([(voice_dir / t["audio"]).read_bytes() for t in timeline], GAP)
+    narration = work / "narration.wav"
+
+    puppet = avatar.enabled(cfg)
+    vertical = size[1] > size[0]
+    if puppet:
+        a_size, a_x, a_y = avatar.layout(size, cfg)
+        left = cfg.get("avatar", {}).get("position", "right") == "left"
+        # 横型は文字とアバターが重ならないよう横幅を空ける（縦型は上下で分ける）
+        reserve = 0 if vertical else a_size + int(size[0] * 0.03)
+        concat_list = write_frames(painter, timeline, size, work, reserve, left)
+    else:
+        concat_list = write_frames(painter, timeline, size, work)
+    narration.write_bytes(narration_bytes)
+
     cmd = [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
            "-i", str(concat_list), "-i", str(narration)]
+    video = f"[0:v]fps={fps},format=yuv420p[v]"
+    next_input = 2
+    if puppet:
+        stream = avatar.write_stream(cfg, narration_bytes, fps, a_size, work)
+        cmd += ["-f", "concat", "-safe", "0", "-i", str(stream)]
+        video = (f"[0:v]fps={fps}[bg];[{next_input}:v]fps={fps},format=rgba[av];"
+                 f"[bg][av]overlay={a_x}:{a_y}:shortest=1,format=yuv420p[v]")
+        next_input += 1
+    audio = "[1:a]anull[a]"
     bgm = cfg["render"].get("bgm", "")
     if bgm and cfg_path(cfg, bgm).exists():
         vol = float(cfg["render"].get("bgm_volume", 0.08))
-        cmd += ["-stream_loop", "-1", "-i", str(cfg_path(cfg, bgm)),
-                "-filter_complex",
-                f"[2:a]volume={vol}[b];[1:a][b]amix=inputs=2:duration=first[a]",
-                "-map", "0:v", "-map", "[a]"]
-    else:
-        cmd += ["-map", "0:v", "-map", "1:a"]
-    cmd += ["-vf", f"fps={fps},format=yuv420p", "-c:v", "libx264", "-preset", "medium",
-            "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-shortest",
-            "-movflags", "+faststart", str(out)]
+        cmd += ["-stream_loop", "-1", "-i", str(cfg_path(cfg, bgm))]
+        audio = (f"[{next_input}:a]volume={vol}[b];"
+                 f"[1:a][b]amix=inputs=2:duration=first[a]")
+    cmd += ["-filter_complex", f"{video};{audio}", "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(out)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RenderError("ffmpeg が失敗しました: " + result.stderr.strip()[-500:])

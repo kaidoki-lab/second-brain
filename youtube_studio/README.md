@@ -46,6 +46,23 @@ YouTube チャンネルを **「AIが毎日1本作る → 人はスマホで見�
 
 SOT21 操作盤の AUTOMATION にも「YouTube 1本作る」「YouTube確認画面」ボタンがあります。
 
+## パペットアバター
+
+動画の右側（ショートは中央）にパペットが出て、**読み上げの声の大きさに合わせて口がパクパク動き**、ときどき瞬きします。
+既定でオン（`avatar.enabled`）。顔出しも自分の声もいりません。
+
+- **何もしなければ** 内蔵の靴下パペット（色は `avatar.color`）
+- **自分のアバターを使うなら** 背景透過のPNGを1つのフォルダに入れて、`avatar.dir` にそのフォルダを書く
+
+  | ファイル | 中身 |
+  | --- | --- |
+  | `closed.png` `half.png` `open.png` | 口を閉じた・半分開いた・全部開いた絵（必須） |
+  | `closed_blink.png` `half_blink.png` `open_blink.png` | 目を閉じた版（任意。無ければ瞬きしない） |
+
+- 左に置くなら `avatar.position` を `"left"`。本編の文字はアバターと重ならないよう自動で幅を詰めます
+
+キャラクターを統一すると「このチャンネルの顔」になり、量産型の動画と見分けてもらいやすくなります。
+
 ## 承認したあとの投稿
 
 | `youtube.upload` | 承認ボタンを押すと | 準備 |
@@ -79,6 +96,7 @@ SOT21 操作盤の AUTOMATION にも「YouTube 1本作る」「YouTube確認画�
 | `format.shorts` | ショートも作るか |
 | `writer.backend` | `ollama` / `claude` |
 | `voice.speaker` / `speed` / `credit` | VOICEVOX の話者番号・話速・概要欄に入れるクレジット（**キャラクターごとの規約で表記が必要**） |
+| `avatar.enabled` / `dir` / `color` / `position` | パペットアバター（上の「パペットアバター」参照） |
 | `render.font` / `background` / `accent` / `bgm` | 見た目。BGM は著作権フリーの音源のパスを書く |
 | `youtube.publish_hour` | 予約投稿の時刻（1日1本ずつ空き枠に入れる） |
 | `youtube.synthetic_media` | 実在の人物・出来事と見間違える合成映像を使うなら `true`（YouTube の開示義務） |
@@ -108,6 +126,7 @@ youtube_studio/
     writer.py    企画・台本（Ollama / Claude）。JSONで受け取り、形を検査して1回だけ書き直させる
     voice.py     VOICEVOX。文ごとに音声を作り、長さで字幕を合わせる
     render.py    Pillow で画面、ffmpeg で mp4。本編・ショート・サムネ
+    avatar.py    パペットアバター。音量で口の3段階を決め、瞬きと一緒に動画へ重ねる
     review.py    確認画面（標準ライブラリの http.server、LAN内のみ、動画のシーク対応）
     youtube.py   OAuth・再開可能アップロード・サムネ・再生数（urllib のみ）
     brain.py     第二の脳とのつなぎ（任意）
@@ -122,7 +141,7 @@ youtube_studio/
 
 ```bash
 cd youtube_studio
-python -m unittest discover -s tests -t tests   # 33件（ffmpeg と日本語フォントが必要）
+python -m unittest discover -s tests -t tests   # 41件（ffmpeg と日本語フォントが必要）
 ```
 
 AI・VOICEVOX・YouTube は偽物に差し替え、ffmpeg は本物で mp4 を作って長さと解像度を確かめます。

@@ -20,7 +20,8 @@
 4. 「テーマは **収益を何らかの形で視聴者に還元するチャンネル**、登録者は19人ほど」
    → 方向を提案して、回答待ち（下の4）
 5. チャンネルURLを受け取ったが、**クラウド環境のネットワーク設定で www.youtube.com が拒否され、中身を見られなかった**
-6. 「デスクトップのクラウドに引き継ぐ」← このファイル
+6. 「デスクトップのクラウドに引き継ぐ」← このファイルを作成
+7. 「パペットアバターを使った動画作りして」→ `studio/avatar.py` を追加（下の2の続き）
 
 ## 2. 何を作ったか（`youtube_studio/`）
 
@@ -50,8 +51,10 @@
 | SOT21 | AUTOMATION に「YouTube 1本作る」「YouTube確認画面」ボタンを追加 |
 | `update.ps1` | 更新対象に `youtube_studio` を追加（`channel.local.json`・`secrets`・`episodes` は残る） |
 
-- コミット: `f4fe7f3`
-- テスト: youtube_studio 33件（AI・VOICEVOX・YouTube は偽物、ffmpeg は本物で mp4 の長さと解像度を検証）、
+| `studio/avatar.py` | **パペットアバター**。読み上げ音声の音量で口を3段階（閉じ・半開き・全開）に動かし、瞬きもする。既定は内蔵の靴下パペット、`avatar.dir` に closed/half/open.png を置けば自分のアバター。本編は右側（文字は自動で幅を詰める）、ショートは中央 |
+
+- コミット: `f4fe7f3`（仕組み）、パペットアバターはその後のコミット
+- テスト: youtube_studio 41件（AI・VOICEVOX・YouTube は偽物、ffmpeg は本物で mp4 の長さと解像度を検証）、
   second_brain 192件、SOT21_Controller 44件 すべて通過
 
 ## 3. 確認できていないこと（要注意）
@@ -59,8 +62,9 @@
 1. **Windows での実行**（bat 4つ、タスクスケジューラ登録）
 2. **本物の VOICEVOX / Ollama / Claude API / YouTube API** とのやり取り
 3. `setup.bat` の VOICEVOX の winget ID `HiroshibaKazuyuki.VOICEVOX` が正しいか（失敗時は公式サイトを開く）
-4. **チャンネルの現在の中身**（ネットワーク制限で見られなかった）
-5. PCにある `C:\KYOUKAI\ShortFACTORY`（SOT21 に既存ボタンあり）が何をする道具か。ショート制作なら役割が重なる
+4. **本物の VOICEVOX の声での口の動き**（強弱をつけた音では確認済み。しきい値は `avatar.mouth_track` の 0.55 / 0.18）
+5. **チャンネルの現在の中身**（ネットワーク制限で見られなかった）
+6. PCにある `C:\KYOUKAI\ShortFACTORY`（SOT21 に既存ボタンあり）が何をする道具か。ショート制作なら役割が重なる
 
 ## 4. 未決定のこと（ユーザーの回答待ち）
 

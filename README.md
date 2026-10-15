@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | [`second_brain/`](second_brain/) | **第二の脳** — 複数AI（ChatGPT / Codex / Claude / Gemini / ローカルAI）へ、確定した事実は共有し思考方法は共有しないための中央管理層 | なし（Python標準ライブラリ + SQLite） |
 | [`SOT21_Controller/`](SOT21_Controller/) | **SOT21 LAN操作盤** — 旧Androidタブレットをブラウザだけの操作端末にし、処理はメインPC側で実行する | Flask / psutil |
-| [`youtube_studio/`](youtube_studio/) | **YouTube STUDIO** — AIが毎日1本（企画→台本→音声→動画）作り、人はスマホで承認するだけでチャンネルを回す | Pillow / ffmpeg / VOICEVOX（台本はローカルAIか Claude） |
+| [`youtube_studio/`](youtube_studio/) | **YouTube STUDIO** — AIが毎日1本（企画→台本→音声→パペットアバターの動画）作り、人はスマホで承認するだけでチャンネルを回す | Pillow / ffmpeg / VOICEVOX（台本はローカルAIか Claude） |
 
 ```
    SOT21 (ブラウザ)                    ChatGPT / Codex / Claude / Gemini
@@ -60,5 +60,5 @@ python app.py               # http://<このPCのIP>:5000
 ```bash
 python -m unittest discover -s second_brain/tests -t second_brain/tests   # 192件
 cd SOT21_Controller && python -m unittest discover -s tests -t tests      # 44件
-cd youtube_studio && python -m unittest discover -s tests -t tests        # 33件
+cd youtube_studio && python -m unittest discover -s tests -t tests        # 41件
 ```

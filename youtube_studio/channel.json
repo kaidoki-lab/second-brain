@@ -42,6 +42,12 @@
     "accent": "#facc15",
     "text": "#f8fafc"
   },
+  "avatar": {
+    "enabled": true,
+    "dir": "",
+    "color": "#f97316",
+    "position": "right"
+  },
   "youtube": {
     "upload": "manual",
     "client_secret": "secrets/client_secret.json",
