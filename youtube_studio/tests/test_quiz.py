@@ -294,6 +294,25 @@ class FlowTest(unittest.TestCase):
         self.assertIn("公開されていない", studio.auto()[-1])
 
 
+class StageTest(unittest.TestCase):
+    """劇場の画面（ffmpeg を使わずに1枚だけ描く）。"""
+
+    def test_quiz_frame_draws_cards_and_stamp(self):
+        from studio.render import Painter
+        box = quiz_box()
+        self.addCleanup(box.cleanup)
+        painter = Painter(box.cfg)
+        cards = [{"letter": "A", "text": "本当の雑学"}, {"letter": "C", "text": "ウソの雑学"}]
+        plain = painter.quiz_slide((540, 960), "ウソはどれだ？", cards, "字幕", 0.5)
+        marked = painter.quiz_slide((540, 960), "前回の答え", cards, "字幕", 0.5, mark="C",
+                                    names=["taro"])
+        self.assertEqual(plain.size, (540, 960))
+
+        def reds(img):
+            return sum(1 for r, g, b in img.getdata() if r > 170 and g < 70 and b < 70)
+        self.assertGreater(reds(marked), reds(plain) + 200)   # 朱の判子と札のふち
+
+
 def can_render():
     exe = shutil.which("ffmpeg")
     if not exe:

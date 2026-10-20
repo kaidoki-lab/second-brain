@@ -22,7 +22,7 @@ from typing import Any
 from .writer import LLM, SYSTEM, WriterError, ask_json, channel_brief, learning_brief
 
 LETTERS = ("A", "B", "C")
-FACT_MAX = 45
+FACT_MAX = 32  # 札に2行で収まる長さ
 DEFAULT_CALL = "ウソだと思う記号を、コメントで教えてね。答えは次の動画で発表します。"
 NAME_NG = "#名前NG"
 MAX_NAMES = 5

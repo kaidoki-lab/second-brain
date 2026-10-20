@@ -18,12 +18,16 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import avatar
+from . import avatar, stage
 from .config import path as cfg_path
 from .voice import concat
 
 GAP = 0.25  # 文と文の間の無音（voice.concat と同じ値）
-QUIZ_CARDS_TOP = 240  # クイズ画面の札の上端（幅1080基準。avatar.layout と合わせる）
+# クイズ画面の寸法（幅1080基準。avatar.layout のキャラ位置と重ならないように決めてある）
+QUIZ_CARDS_TOP = 330
+QUIZ_CARD_H = 136
+QUIZ_CARD_GAP = 18
+QUIZ_SIDE = 120  # 両脇の幕の内側
 
 FONT_CANDIDATES = [
     # Windows
@@ -79,10 +83,27 @@ def wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont,
     return lines
 
 
+def balanced(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont,
+             width: int) -> list[str]:
+    """行数を変えずに一番狭い幅で折り返す（最後の行に1〜2文字だけ残らないように）。"""
+    lines = wrap(draw, text, font, width)
+    if len(lines) < 2:
+        return lines
+    lo, hi = width // 2, width
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if len(wrap(draw, text, font, mid)) <= len(lines):
+            hi = mid
+        else:
+            lo = mid + 1
+    return wrap(draw, text, font, lo)
+
+
 class Painter:
     def __init__(self, cfg: dict[str, Any]):
         r = cfg["render"]
         self.font_path = find_font(r.get("font", ""))
+        self.serif = r.get("serif", "")
         self.bg = _rgb(r.get("background", "#0f172a"))
         self.accent = _rgb(r.get("accent", "#facc15"))
         self.fg = _rgb(r.get("text", "#f8fafc"))
@@ -157,77 +178,85 @@ class Painter:
     def quiz_slide(self, size: tuple[int, int], heading: str, cards: list[dict[str, str]],
                    caption: str, progress: float, mark: str = "",
                    names: list[str] | None = None) -> Image.Image:
-        """「ウソはどれだ」の縦型画面。上に A/B/C の札、真ん中にキャラ、下に字幕。
+        """「ウソはどれだ」の縦型画面（人形劇場の舞台）。
 
-        mark: 答え合わせで「ウソ」の印をつける記号。アバターは avatar.layout の
-        quiz 配置（札と字幕の間）に重なる。
+        上に演目の題と A/B/C の札、スポットライトの下にキャラ（avatar.layout の quiz 配置）、
+        舞台の床の上に字幕。mark: 答え合わせで朱の判子を押す記号。
         """
         w, h = size
         unit = w / 1080
-        img = Image.new("RGB", size, self.bg)
+        img = stage.background(w, h).convert("RGBA")
         draw = ImageDraw.Draw(img)
-        margin = int(60 * unit)
+        serif_path = stage.find_serif(self.serif) or self.font_path
 
-        hf = self.font(int(84 * unit))
-        hw = draw.textlength(heading, font=hf)
-        draw.text(((w - hw) / 2, int(110 * unit)), heading, font=hf, fill=self.accent,
-                  stroke_width=int(4 * unit), stroke_fill=(0, 0, 0))
+        def sf(px: float, weight: str = "Bold") -> ImageFont.FreeTypeFont:
+            return stage.serif(serif_path, max(8, int(px * unit)), weight)
 
+        cx = w / 2
+        if self.channel:
+            label = "　".join(self.channel) if len(self.channel) <= 10 else self.channel
+            draw.text((cx, 128 * unit), label, font=sf(30, "Medium"), fill=stage.GOLD,
+                      anchor="mm")
+        tf = sf(92, "Black")
+        tw = draw.textlength(heading, font=tf)
+        stage.gold_text(img, (cx - tw / 2, 160 * unit), heading, tf, max(1, int(4 * unit)))
+        stage.ornament(draw, cx, 292 * unit, 300 * unit, unit)
+
+        x0, x1 = int(QUIZ_SIDE * unit), w - int(QUIZ_SIDE * unit)
         y = QUIZ_CARDS_TOP * unit
-        card_h = int(150 * unit)
-        for card in cards:
-            lie = card["letter"] == mark
-            edge = (239, 68, 68) if lie else self.accent
-            draw.rounded_rectangle([margin, y, w - margin, y + card_h], int(24 * unit),
-                                   fill=(255, 255, 255), outline=edge, width=int(6 * unit))
-            badge = int(100 * unit)
-            bx, by = margin + int(24 * unit), y + (card_h - badge) // 2
-            draw.ellipse([bx, by, bx + badge, by + badge], fill=edge)
-            lf = self.font(int(64 * unit))
-            lw = draw.textlength(card["letter"], font=lf)
-            draw.text((bx + (badge - lw) / 2, by + int(8 * unit)), card["letter"], font=lf,
-                      fill=(255, 255, 255))
-            tx = bx + badge + int(28 * unit)
-            size_t = int(46 * unit)
-            n = len(wrap(draw, card["text"], self.font(size_t),
-                         w - margin - tx - int(20 * unit))[:2])
-            ty = y + (card_h - int(size_t * 1.3) * n) // 2 - int(4 * unit)
-            self._block(draw, (tx, ty), card["text"], size_t,
-                        (15, 23, 42), w - margin - tx - int(20 * unit), 2, 1.3)
+        card_h = int(QUIZ_CARD_H * unit)
+        r = 44 * unit
+        text_x = x0 + int(24 * unit) + r * 2 + int(26 * unit)
+        text_w = x1 - text_x - int(28 * unit)
+        body = sf(40, "SemiBold")
+        for c in cards:
+            lie = c["letter"] == mark
+            stage.card(img, (x0, int(y), x1, int(y) + card_h), unit, lie)
+            stage.letter_badge(img, x0 + int(24 * unit) + r, y + card_h / 2, r, c["letter"],
+                               sf(54, "Black"), lie)
+            lines = wrap(draw, c["text"], body, text_w)[:2]
+            line_h = int(40 * unit * 1.35)
+            ty = y + (card_h - line_h * len(lines)) / 2
+            for line in lines:
+                draw.text((text_x, ty), line, font=body, fill=stage.INK)
+                ty += line_h
             if lie:
-                sf = self.font(int(56 * unit))
-                stamp = "ウソ"
-                sw = draw.textlength(stamp, font=sf)
-                draw.text((w - margin - sw - int(16 * unit), y - int(40 * unit)), stamp,
-                          font=sf, fill=(239, 68, 68), stroke_width=int(5 * unit),
-                          stroke_fill=(255, 255, 255))
-            y += card_h + int(24 * unit)
+                stage.stamp(img, (x1 - 72 * unit, y + 14 * unit), "ウソ", sf(36, "Black"),
+                            68 * unit)
+            y += card_h + int(QUIZ_CARD_GAP * unit)
 
         if names:
-            line = "正解: " + "・".join(names)
-            self._block(draw, (margin, y + int(10 * unit)), line, int(44 * unit),
-                        self.fg, w - margin * 2, 2)
+            nf = sf(38, "SemiBold")
+            line = "正解　" + "・".join(names)
+            lines = wrap(draw, line, nf, x1 - x0)[:2]
+            ny = y + 6 * unit
+            for ln in lines:
+                draw.text((cx, ny), ln, font=nf, fill=stage.GOLD_LIGHT, anchor="ma")
+                ny += 38 * unit * 1.35
 
         if caption:
-            cap_size = int(62 * unit)
-            lines = wrap(draw, caption, self.font(cap_size), w - margin * 2)[:3]
-            band_h = int(cap_size * 1.4 * len(lines) + 60 * unit)
-            band_top = h - band_h - int(150 * unit)
-            draw.rectangle([0, band_top, w, band_top + band_h], fill=(0, 0, 0))
-            cy = band_top + int(30 * unit)
+            shade = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shade)
+            top = int(h * 0.80)
+            for yy in range(top, h):
+                a = int(200 * min(1.0, (yy - top) / (h * 0.06)))
+                sd.line([(0, yy), (w, yy)], fill=(8, 4, 4, a))
+            img.alpha_composite(shade)
+            draw = ImageDraw.Draw(img)
+            cap = self.font(int(56 * unit))
+            lines = balanced(draw, caption, cap, w - int(130 * unit) * 2)[:3]
+            line_h = int(56 * unit * 1.45)
+            cy = h - int(150 * unit) - line_h * len(lines)
             for line in lines:
-                lw = draw.textlength(line, font=self.font(cap_size))
-                draw.text(((w - lw) / 2, cy), line, font=self.font(cap_size),
-                          fill=(255, 255, 255))
-                cy += int(cap_size * 1.4)
+                draw.text((cx, cy), line, font=cap, fill=stage.IVORY, anchor="ma",
+                          stroke_width=max(1, int(5 * unit)), stroke_fill=(20, 8, 8))
+                cy += line_h
 
-        draw.rectangle([0, h - int(10 * unit), int(w * progress), h], fill=self.accent)
-        if self.channel:
-            name_font = self.font(int(30 * unit))
-            nw = draw.textlength(self.channel, font=name_font)
-            draw.text((w - margin - nw, int(40 * unit)), self.channel,
-                      font=name_font, fill=(148, 163, 184))
-        return img
+        bar_y = h - int(70 * unit)
+        draw.line([(x0, bar_y), (x1, bar_y)], fill=(90, 60, 30), width=max(1, int(3 * unit)))
+        draw.line([(x0, bar_y), (x0 + (x1 - x0) * progress, bar_y)], fill=stage.GOLD,
+                  width=max(1, int(3 * unit)))
+        return img.convert("RGB")
 
     def thumbnail(self, text: str, sub: str = "") -> Image.Image:
         w, h = 1280, 720

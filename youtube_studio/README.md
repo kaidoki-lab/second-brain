@@ -77,6 +77,7 @@ SOT21 操作盤の AUTOMATION にも「YouTube 1本作る」「YouTube確認画�
   無いときは答えだけ発表します
 - 答え合わせが前回とずれないよう、**前の回が公開されるまで次の回は作りません**（手動投稿なら、確認画面で公開URLを記録すると次へ進みます）
 - 承認画面の一番上に **答えと出典** が出ます（動画には答えは出ません）
+- 画面は **人形劇場の舞台**（赤い幕・スポットライト・金の題・象牙色の札・答え合わせは朱の判子）。題と札は明朝体（`render.serif`。未設定なら Noto Serif JP などを自動で探す）
 - ウソは無害な題材に限るよう台本に指示し、さらに「切り抜かれて広まっても害がないか」を確認項目の先頭に必ず入れます
 
 ### 出演キャラ（PUPPET-AVATAR）
@@ -162,6 +163,7 @@ youtube_studio/
     render.py    Pillow で画面、ffmpeg で mp4。本編・ショート・サムネ
     avatar.py    パペットアバター。音量で口の3段階を決め、瞬きと一緒に動画へ重ねる
     quiz.py      ウソはどれだ。3択の台本・並び順・コメントの採点・答え合わせ
+    stage.py     クイズ画面の見た目（幕・スポットライト・札・判子）
     cast.py      出演キャラ。PUPPET-AVATAR の絵の取り込み・入れ替え・キャラ別の反応
     review.py    確認画面（標準ライブラリの http.server、LAN内のみ、動画のシーク対応）
     youtube.py   OAuth・再開可能アップロード・サムネ・再生数（urllib のみ）
@@ -177,7 +179,7 @@ youtube_studio/
 
 ```bash
 cd youtube_studio
-python -m unittest discover -s tests -t tests   # 60件（ffmpeg と日本語フォントが必要）
+python -m unittest discover -s tests -t tests   # 61件（ffmpeg と日本語フォントが必要）
 ```
 
 AI・VOICEVOX・YouTube は偽物に差し替え、ffmpeg は本物で mp4 を作って長さと解像度を確かめます。
