@@ -183,7 +183,7 @@
 ## 8. 次にやること（最新）
 
 1. ブランチ `ccr-b5ea05d3-1uiv4y` を main へマージ（PR を作るか確認）→ PCで `update.bat`
-2. PCに ffmpeg を入れる（`setup.bat` が winget で入れる）→ テスト61件を全部通す
+2. ~~PCに ffmpeg を入れる~~ → 2026-10-21 winget で導入済み（Gyan.FFmpeg 9.0.2）。**テスト61件すべて通過**。本物のキャラ（腹話術人形）で見本のショートを書き出せることも確認
 3. `python run.py preset uso_quiz` → `python run.py check`（VOICEVOX を起動しておく。6体の声が出るか）
 4. `auto.bat` で1本目 → `review.bat` で見る → 承認 → YouTube に投稿 → 公開URLを記録
 5. YouTube Studio でチャンネル名を「ウソつき人形劇場」に変える（まろ）

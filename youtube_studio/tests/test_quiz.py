@@ -309,7 +309,9 @@ class StageTest(unittest.TestCase):
         self.assertEqual(plain.size, (540, 960))
 
         def reds(img):
-            return sum(1 for r, g, b in img.getdata() if r > 170 and g < 70 and b < 70)
+            raw = img.convert("RGB").tobytes()
+            return sum(1 for i in range(0, len(raw), 3)
+                       if raw[i] > 170 and raw[i + 1] < 70 and raw[i + 2] < 70)
         self.assertGreater(reds(marked), reds(plain) + 200)   # 朱の判子と札のふち
 
 
