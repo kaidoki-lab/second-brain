@@ -7,3 +7,5 @@ brain.db-shm
 SOT21_Controller/logs/*.log
 SOT21_Controller/logs/*.log.*
 config.local.json
+fx_bot/data/*
+!fx_bot/data/.gitkeep
