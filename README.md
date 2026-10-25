@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | [`second_brain/`](second_brain/) | **第二の脳** — 複数AI（ChatGPT / Codex / Claude / Gemini / ローカルAI）へ、確定した事実は共有し思考方法は共有しないための中央管理層 | なし（Python標準ライブラリ + SQLite） |
 | [`SOT21_Controller/`](SOT21_Controller/) | **SOT21 LAN操作盤** — 旧Androidタブレットをブラウザだけの操作端末にし、処理はメインPC側で実行する | Flask / psutil |
-| [`fx_bot/`](fx_bot/) | **FX 自動売買 検証基盤** — 業者非依存のバックテスト。上の2つとは連携しない独立ツール | なし（Python標準ライブラリ） |
+| [`fx_bot/`](fx_bot/) | **FX 自動売買 検証基盤** — バックテスト + MT5 デモ口座での自動売買。上の2つとは連携しない独立ツール | Python標準ライブラリ（MT5連携時のみ MetaTrader5） |
 
 ```
    SOT21 (ブラウザ)                    ChatGPT / Codex / Claude / Gemini

@@ -1,4 +1,4 @@
-"""Command line: sample / strategies / backtest / optimize."""
+"""Command line: sample / strategies / backtest / optimize / fetch / live."""
 
 from __future__ import annotations
 
@@ -7,18 +7,24 @@ import csv
 import itertools
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 from . import backtest, data, metrics, strategy
+from .mt5 import TIMEFRAMES, MT5Error
 from .risk import RiskConfig, pip_size
 
 
 def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--csv", required=True, help="価格データ (time,open,high,low,close / MT5エクスポート形式)")
     p.add_argument("--symbol", default="USDJPY", help="通貨ペア (pipサイズの判定に使用)")
-    p.add_argument("--strategy", default="ma_cross", choices=sorted(strategy.STRATEGIES))
     p.add_argument("--spread", type=float, default=0.3, help="スプレッド (pips)")
     p.add_argument("--equity", type=float, default=1_000_000, help="初期資金 (口座通貨)")
+    _trading(p)
+
+
+def _trading(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--strategy", default="ma_cross", choices=sorted(strategy.STRATEGIES))
     p.add_argument("--risk", type=float, default=1.0, help="1取引で許容する損失 (資金の%%)")
     p.add_argument("--leverage", type=float, default=25.0, help="最大レバレッジ")
     p.add_argument("--max-dd", type=float, default=20.0, help="この%%を超えて資金が減ったら停止")
@@ -116,6 +122,38 @@ def cmd_optimize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fetch(args: argparse.Namespace) -> int:
+    from . import mt5 as mt5link
+
+    mt5 = mt5link.connect(args.terminal)
+    try:
+        bars = mt5link.fetch_bars(mt5, args.symbol, args.timeframe, args.bars)
+    finally:
+        mt5.shutdown()
+    out = args.out or f"data/{args.symbol}_{args.timeframe}.csv"
+    data.write_csv(out, bars)
+    print(f"{args.symbol} {args.timeframe} を {len(bars)} 本保存しました: {out}  ({bars[0].time} 〜 {bars[-1].time}, サーバー時刻)")
+    if len(bars) < args.bars:
+        print("  ※ 要求より少ない場合は MT5 の ツール→オプション→チャート「チャートの最大バー数」を増やしてください")
+    return 0
+
+
+def cmd_live(args: argparse.Namespace) -> int:
+    from . import mt5 as mt5link
+
+    strat = strategy.build(args.strategy, strategy.parse_params(args.params))
+    mt5 = mt5link.connect(args.terminal)
+    try:
+        mt5link.run_live(mt5, args.symbol, args.timeframe, strat, _risk(args),
+                         history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
+                         log=lambda msg: print(f"[{datetime.now():%m-%d %H:%M:%S}] {msg}", flush=True))
+    except KeyboardInterrupt:
+        print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
+    finally:
+        mt5.shutdown()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -145,9 +183,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--top", type=int, default=10)
     p.set_defaults(func=cmd_optimize)
 
+    def _mt5(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--symbol", default="USDJPY", help="MT5 上の銘柄名 (業者により USDJPY- など)")
+        p.add_argument("--timeframe", default="H1", choices=TIMEFRAMES)
+        p.add_argument("--terminal", help="terminal64.exe のパス (自動で見つからない時だけ)")
+
+    p = sub.add_parser("fetch", help="MT5 から過去データをCSVに保存")
+    _mt5(p)
+    p.add_argument("--bars", type=int, default=50_000)
+    p.add_argument("--out", help="保存先 (既定: data/<銘柄>_<時間足>.csv)")
+    p.set_defaults(func=cmd_fetch)
+
+    p = sub.add_parser("live", help="MT5 デモ口座で自動売買")
+    _mt5(p)
+    _trading(p)
+    p.add_argument("--params", help="例: fast=20,slow=80,sl_atr=2")
+    p.add_argument("--history", type=int, default=1000, help="判断に使う足の本数")
+    p.add_argument("--poll", type=float, default=5.0, help="新しい足の確認間隔 (秒)")
+    p.add_argument("--once", action="store_true", help="1回だけ判断して終了 (動作確認用)")
+    p.add_argument("--allow-real", action="store_true", help="リアル口座でも動かす (非推奨)")
+    p.set_defaults(func=cmd_live)
+
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, FileNotFoundError, MT5Error) as exc:
         print(f"[エラー] {exc}", file=sys.stderr)
         return 1
