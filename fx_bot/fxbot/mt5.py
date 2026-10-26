@@ -7,14 +7,16 @@ pass a fake; real callers use `connect()`.
 
 from __future__ import annotations
 
+import csv
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from .backtest import step
 from .broker import Broker, Position
 from .data import Bar
-from .risk import DrawdownGuard, RiskConfig
+from .risk import DrawdownGuard, RiskConfig, pip_size
 from .strategy import Strategy
 
 TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
@@ -73,16 +75,25 @@ def fetch_bars(mt5: Any, symbol: str, timeframe: str, count: int) -> list[Bar]:
     ]
 
 
+FILL_FIELDS = ("time", "symbol", "action", "volume", "bid", "ask", "requested", "filled", "slip_pips", "spread_pips")
+
+
 class MT5Broker(Broker):
-    """Market orders with server-side SL/TP. Only sees positions carrying our magic number."""
+    """Market orders with server-side SL/TP. Only sees positions carrying our magic number.
+
+    With `fills`, every market fill is appended to that CSV with the price asked
+    for and the price got, so live slippage can be compared with the backtest's.
+    `slip_pips` is positive when the fill was worse than requested.
+    """
 
     def __init__(self, mt5: Any, symbol: str, magic: int = MAGIC, deviation: int = 20,
-                 log: Callable[[str], None] = print) -> None:
+                 log: Callable[[str], None] = print, fills: str | Path | None = None) -> None:
         self.mt5 = mt5
         self.symbol = symbol
         self.magic = magic
         self.deviation = deviation
         self.log = log
+        self.fills = Path(fills) if fills else None
         self.info = _symbol(mt5, symbol)
         self.contract = self.info.trade_contract_size
 
@@ -130,11 +141,28 @@ class MT5Broker(Broker):
             "magic": self.magic, "comment": "fxbot", "type_time": self.mt5.ORDER_TIME_GTC,
             "type_filling": self._filling(), **request,
         }
+        tick = self.mt5.symbol_info_tick(self.symbol)
         result = self.mt5.order_send(request)
         if result is None or result.retcode != self.mt5.TRADE_RETCODE_DONE:
             detail = f"{result.retcode} {result.comment}" if result is not None else str(self.mt5.last_error())
             raise MT5Error(f"{what} に失敗: {detail}")
         self.log(f"{what}: {request['volume']} lot @ {result.price}")
+        if self.fills is not None:
+            self._record_fill(what, request, result.price, tick)
+
+    def _record_fill(self, what: str, request: dict[str, Any], filled: float, tick: Any) -> None:
+        pip = pip_size(self.symbol)
+        sign = 1 if request["type"] == self.mt5.ORDER_TYPE_BUY else -1   # paying more on a buy is worse
+        row = (f"{datetime.now():%Y-%m-%d %H:%M:%S}", self.symbol, what, request["volume"], tick.bid, tick.ask,
+               request["price"], filled, round(sign * (filled - request["price"]) / pip, 2),
+               round((tick.ask - tick.bid) / pip, 2))
+        new = not self.fills.exists()
+        self.fills.parent.mkdir(parents=True, exist_ok=True)
+        with self.fills.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(FILL_FIELDS)
+            w.writerow(row)
 
     def open(self, direction: int, units: int, stop: float | None, take: float | None) -> None:
         lots = self.to_lots(units)
@@ -176,11 +204,12 @@ def run_live(
     once: bool = False,
     log: Callable[[str], None] = print,
     sleep: Callable[[float], None] = time.sleep,
+    fills: str | Path | None = None,
 ) -> None:
     """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt."""
     if not is_demo(mt5) and not allow_real:
         raise MT5Error("リアル口座です。安全のため停止しました (どうしても動かす場合のみ --allow-real)")
-    broker = MT5Broker(mt5, symbol, log=log)
+    broker = MT5Broker(mt5, symbol, log=log, fills=fills)
     risk.lot_step = broker.unit_step
     guard = DrawdownGuard(risk.max_drawdown_pct)
     log(account_summary(mt5))

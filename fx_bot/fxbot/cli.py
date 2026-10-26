@@ -148,7 +148,8 @@ def cmd_live(args: argparse.Namespace) -> int:
     try:
         mt5link.run_live(mt5, args.symbol, args.timeframe, strat, _risk(args),
                          history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
-                         log=lambda msg: print(f"[{datetime.now():%m-%d %H:%M:%S}] {msg}", flush=True))
+                         log=lambda msg: print(f"[{datetime.now():%m-%d %H:%M:%S}] {msg}", flush=True),
+                         fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv")
     except KeyboardInterrupt:
         print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
     finally:
@@ -204,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--poll", type=float, default=5.0, help="新しい足の確認間隔 (秒)")
     p.add_argument("--once", action="store_true", help="1回だけ判断して終了 (動作確認用)")
     p.add_argument("--allow-real", action="store_true", help="リアル口座でも動かす (非推奨)")
+    p.add_argument("--fills", help="約定記録CSV (既定: data/fills_<銘柄>.csv、\"\" で記録しない)")
     p.set_defaults(func=cmd_live)
 
     args = parser.parse_args(argv)

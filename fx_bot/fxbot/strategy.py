@@ -165,16 +165,20 @@ class SessionBreakout(Strategy):
 
     Hours are the data's own clock (MT5 server time). Meant for H1 or shorter bars.
     Being flat every evening also means never holding over the weekend.
+    `side` 1 / -1 trades only longs / shorts (a break the other way goes flat);
+    `no_fri` 1 stays flat on Fridays.
     """
 
     name = "session_bo"
-    summary = "その日の rs〜re 時の高値/安値を抜けたら入り、exit_h 時に必ず手仕舞い（時刻はサーバー時刻）"
-    params = {"rs": 0, "re": 8, "exit_h": 20, **_EXIT_PARAMS}
+    summary = ("その日の rs〜re 時の高値/安値を抜けたら入り、exit_h 時に必ず手仕舞い（時刻はサーバー時刻）。"
+               "side=1 で買いのみ / -1 で売りのみ、no_fri=1 で金曜は休む")
+    params = {"rs": 0, "re": 8, "exit_h": 20, "side": 0, "no_fri": 0, **_EXIT_PARAMS}
 
     def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
         rs, re_, exit_h = int(self.p["rs"]), int(self.p["re"]), int(self.p["exit_h"])
+        side = int(self.p["side"])
         t = bars[i].time
-        if t.hour >= exit_h or t.hour < re_:
+        if t.hour >= exit_h or t.hour < re_ or (self.p["no_fri"] and t.weekday() == 4):
             return Decision(0)
         hi = lo = None
         k = i
@@ -186,11 +190,12 @@ class SessionBreakout(Strategy):
         exits = self._exits(bars, i)
         if hi is None or lo is None or exits is None:
             return None
-        if bars[i].close > hi:
-            return Decision(1, *exits)
-        if bars[i].close < lo:
-            return Decision(-1, *exits)
-        return None
+        direction = 1 if bars[i].close > hi else -1 if bars[i].close < lo else 0
+        if direction == 0:
+            return None
+        if side and direction != side:
+            return Decision(0)
+        return Decision(direction, *exits)
 
 
 STRATEGIES: dict[str, type[Strategy]] = {

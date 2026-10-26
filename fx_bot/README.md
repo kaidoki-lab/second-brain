@@ -28,6 +28,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 | --- | --- | --- |
 | `mt5_fetch.bat` | `python run.py fetch --symbol USDJPY --timeframe H1` | 過去データを `data/USDJPY_H1.csv` に保存 |
 | `mt5_demo.bat` | `python run.py live --symbol USDJPY --timeframe H1 --strategy ma_cross` | デモ口座で自動売買 |
+| `mt5_session_bo.bat` | `python run.py live ... --strategy session_bo --risk 0.5 --params ...,side=1,no_fri=1` | USDJPY の session_bo（買いのみ・金曜休み）をデモで前進テスト |
 
 `live` の動き:
 
@@ -36,6 +37,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 - 自分の注文には目印（マジックナンバー）を付け、**手動で持っているポジションには触りません**
 - 開始後の最高値から `--max-dd`% 有効証拠金が減ったら全決済して終了
 - Ctrl+C で停止（ポジションは残る）。`--once` で1回だけ判断して終了（動作確認用）
+- 成行の約定は `data/fills_<銘柄>.csv` に「頼んだ価格・約定価格・滑り(pips)・スプレッド」を1行ずつ残します（`--fills ""` で無効）。MT5 側で約定した損切りは記録されないので、MT5 の履歴で確認します
 - リアル口座だと起動を拒否します（`--allow-real` で解除できますが、デモで十分確かめてから）
 
 `pip install MetaTrader5` が失敗するときは、その Python のバージョンにまだ対応していない可能性があります。
@@ -83,7 +85,7 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 | `band_revert` | 移動平均から標準偏差 k 個分以上離れたら逆張り、平均を跨いだら手仕舞い | `n` `k` |
 | `rsi_revert` | RSI が `lo` 未満で買い・`hi` 超で売り、50 を跨いだら手仕舞い | `n` `lo` `hi` |
 | `pullback` | 終値が長期SMA(`trend`)より上なら RSI の押し目で買い、下なら戻りで売り。RSI が 50 を跨いだら手仕舞い | `trend` `n` `lo` `hi` |
-| `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け） | `rs` `re` `exit_h` |
+| `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け）。`side=1` で買いのみ・`-1` で売りのみ、`no_fri=1` で金曜は休む | `rs` `re` `exit_h` `side` `no_fri` |
 
 どれも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
 

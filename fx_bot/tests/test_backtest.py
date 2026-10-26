@@ -125,6 +125,18 @@ class StrategyTest(unittest.TestCase):
         self.assertEqual(s.decide(series, 9).direction, 1)      # broke 101
         self.assertEqual(s.decide(series, 20).direction, 0)     # 20:00 -> flat
 
+    def test_session_breakout_side_and_friday_filters(self):
+        up = [(100, 101, 99, 100)] * 8 + [(100, 102, 100, 101.5)]
+        down = [(100, 101, 99, 100)] * 8 + [(100, 100, 98, 98.5)]
+        p = dict(rs=0, re=8, exit_h=20, atr=5)
+        self.assertEqual(SessionBreakout(side=1, **p).decide(bars(up), 8).direction, 1)
+        self.assertEqual(SessionBreakout(side=1, **p).decide(bars(down), 8).direction, 0)   # short break -> flat
+        self.assertEqual(SessionBreakout(side=-1, **p).decide(bars(down), 8).direction, -1)
+        friday = bars([(100, 100, 100, 100)] * 96 + up)         # 2024-01-01 is a Monday
+        self.assertEqual(friday[104].time.weekday(), 4)
+        self.assertEqual(SessionBreakout(**p).decide(friday, 104).direction, 1)
+        self.assertEqual(SessionBreakout(no_fri=1, **p).decide(friday, 104).direction, 0)
+
     def test_new_strategies_run_end_to_end(self):
         series = data.synthetic(n=1500, seed=3)
         for name in ("band_revert", "rsi_revert", "pullback", "session_bo"):

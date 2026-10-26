@@ -1,6 +1,9 @@
 """MT5 link against an in-memory fake of the MetaTrader5 module."""
 
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import _ctx  # noqa: F401
@@ -105,6 +108,27 @@ class MT5BrokerTest(unittest.TestCase):
         self.assertIsNone(b.position())
         b.close()
         self.assertEqual(fake.requests, [])
+
+    def test_fills_csv_records_slippage(self):
+        fake = FakeMT5()
+        send = fake.order_send
+
+        def slipping(req):                           # every fill 0.2 pips worse than asked
+            res = send(req)
+            res.price = round(req["price"] + (0.002 if req["type"] == fake.ORDER_TYPE_BUY else -0.002), 3)
+            return res
+
+        fake.order_send = slipping
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fills.csv"
+            b = link.MT5Broker(fake, "USDJPY", log=lambda m: None, fills=path)
+            b.open(1, 20_000, stop=0.5, take=None)
+            b.close()
+            with path.open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        self.assertEqual([r["action"] for r in rows], ["新規買い", "決済 (signal)"])
+        self.assertEqual([float(r["slip_pips"]) for r in rows], [0.2, 0.2])
+        self.assertEqual(float(rows[0]["spread_pips"]), 0.3)
 
     def test_rejected_order_raises(self):
         fake = FakeMT5()
