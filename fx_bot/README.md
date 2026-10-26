@@ -80,8 +80,12 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 | --- | --- | --- |
 | `ma_cross` | 短期SMA > 長期SMA なら買い、逆なら売り | `fast` `slow` |
 | `breakout` | 直近 n 本の高値/安値を終値で抜けた方向に入る | `n` |
+| `band_revert` | 移動平均から標準偏差 k 個分以上離れたら逆張り、平均を跨いだら手仕舞い | `n` `k` |
+| `rsi_revert` | RSI が `lo` 未満で買い・`hi` 超で売り、50 を跨いだら手仕舞い | `n` `lo` `hi` |
+| `pullback` | 終値が長期SMA(`trend`)より上なら RSI の押し目で買い、下なら戻りで売り。RSI が 50 を跨いだら手仕舞い | `trend` `n` `lo` `hi` |
+| `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け） | `rs` `re` `exit_h` |
 
-どちらも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
+どれも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
 
 ## シミュレーションの約束事（甘く見積もらないため）
 

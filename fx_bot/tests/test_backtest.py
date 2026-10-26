@@ -4,7 +4,9 @@ from _ctx import bars, flat
 
 from fxbot import backtest, data, metrics
 from fxbot.risk import RiskConfig
-from fxbot.strategy import Breakout, Decision, MACross, Strategy, build, parse_params
+from fxbot.indicators import rsi, stdev
+from fxbot.strategy import (BandRevert, Breakout, Decision, MACross, Pullback, RSIRevert, SessionBreakout,
+                            Strategy, build, parse_params)
 
 
 class Script(Strategy):
@@ -79,6 +81,55 @@ class StrategyTest(unittest.TestCase):
         d = Breakout(n=10, atr=5).decide(bars(rows), 20)
         self.assertEqual(d.direction, 1)
         self.assertIsNone(Breakout(n=10, atr=5).decide(bars(rows), 19))
+
+    def test_indicators(self):
+        series = bars([(c, c, c, c) for c in (1, 2, 3, 2, 1)])
+        self.assertAlmostEqual(stdev(series, 2, 3), (2 / 3) ** 0.5)
+        self.assertEqual(rsi(series, 2, 2), 100)        # two gains
+        self.assertEqual(rsi(series, 4, 2), 0)          # two losses
+        self.assertEqual(rsi(series, 3, 2), 50)         # +1 then -1
+        self.assertIsNone(rsi(series, 1, 2))
+
+    def test_band_revert_fades_and_exits_at_mean(self):
+        rows = [(100, 100.5, 99.5, 100 + (0.2 if k % 2 else -0.2)) for k in range(30)]
+        spike = bars(rows + [(100, 103, 100, 103)])
+        self.assertEqual(BandRevert(n=20, atr=5).decide(spike, 30).direction, -1)
+        dip = bars(rows + [(100, 100, 97, 97)])
+        self.assertEqual(BandRevert(n=20, atr=5).decide(dip, 30).direction, 1)
+        back = bars(rows + [(100, 101, 99, 100.25), (100, 100, 99.8, 99.9)])
+        self.assertEqual(BandRevert(n=20, atr=5).decide(back, 31).direction, 0)
+
+    def test_rsi_revert(self):
+        falling = bars([(100 - k, 101 - k, 99 - k, 100 - k) for k in range(20)])
+        self.assertEqual(RSIRevert(n=14, atr=5).decide(falling, 19).direction, 1)
+        rising = bars([(100 + k, 101 + k, 99 + k, 100 + k) for k in range(20)])
+        self.assertEqual(RSIRevert(n=14, atr=5).decide(rising, 19).direction, -1)
+
+    def test_pullback_only_with_trend(self):
+        up = [(100 + k, 101 + k, 99 + k, 100 + k) for k in range(60)]
+        dip = up + [(c, c + 1, c - 1, c) for c in (158, 157, 156)]
+        s = Pullback(trend=50, n=3, atr=5)
+        self.assertEqual(s.decide(bars(dip), len(dip) - 1).direction, 1)
+        # same RSI dip below a falling trend is not bought
+        down = [(200 - k, 201 - k, 199 - k, 200 - k) for k in range(60)]
+        self.assertNotEqual(getattr(s.decide(bars(down), 59), "direction", None), 1)
+
+    def test_session_breakout_range_and_forced_exit(self):
+        # 00:00-07:00 range 99..101, then a break at 09:00, then 20:00 forces flat
+        rows = [(100, 101, 99, 100)] * 8 + [(100, 100.5, 99.5, 100), (100, 102, 100, 101.5)]
+        rows += [(101, 101.5, 100.5, 101)] * 10 + [(101, 101, 101, 101)]
+        series = bars(rows)
+        s = SessionBreakout(rs=0, re=8, exit_h=20, atr=5)
+        self.assertEqual(s.decide(series, 7).direction, 0)      # still inside the range window
+        self.assertIsNone(s.decide(series, 8))                  # inside the range
+        self.assertEqual(s.decide(series, 9).direction, 1)      # broke 101
+        self.assertEqual(s.decide(series, 20).direction, 0)     # 20:00 -> flat
+
+    def test_new_strategies_run_end_to_end(self):
+        series = data.synthetic(n=1500, seed=3)
+        for name in ("band_revert", "rsi_revert", "pullback", "session_bo"):
+            r = backtest.run(series, build(name), spread=0.003)
+            self.assertAlmostEqual(r.final_equity, 1_000_000 + sum(t.pnl for t in r.trades), places=4)
 
 
 if __name__ == "__main__":

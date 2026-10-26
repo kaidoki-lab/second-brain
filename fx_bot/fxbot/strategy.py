@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from .data import Bar
-from .indicators import atr, highest, lowest, sma
+from .indicators import atr, highest, lowest, rsi, sma, stdev
 
 
 @dataclass(frozen=True)
@@ -90,7 +90,112 @@ class Breakout(Strategy):
         return None
 
 
-STRATEGIES: dict[str, type[Strategy]] = {cls.name: cls for cls in (MACross, Breakout)}
+class BandRevert(Strategy):
+    """Fade stretches: short above mean + k*stdev, long below mean - k*stdev, flat when price crosses the mean."""
+
+    name = "band_revert"
+    summary = "移動平均から標準偏差k個分以上離れたら逆張り、平均に戻ったら手仕舞い"
+    params = {"n": 20, "k": 2.0, **_EXIT_PARAMS}
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        n = int(self.p["n"])
+        mean, sd = sma(bars, i, n), stdev(bars, i, n)
+        prev_mean = sma(bars, i - 1, n) if i > 0 else None
+        exits = self._exits(bars, i)
+        if mean is None or prev_mean is None or not sd or exits is None:
+            return None
+        close, prev = bars[i].close, bars[i - 1].close
+        if close > mean + self.p["k"] * sd:
+            return Decision(-1, *exits)
+        if close < mean - self.p["k"] * sd:
+            return Decision(1, *exits)
+        if (prev - prev_mean) * (close - mean) <= 0:
+            return Decision(0)
+        return None
+
+
+class RSIRevert(Strategy):
+    """Long when RSI is oversold, short when overbought, flat when RSI crosses 50."""
+
+    name = "rsi_revert"
+    summary = "RSIが売られすぎで買い・買われすぎで売り、50を跨いだら手仕舞い"
+    params = {"n": 14, "lo": 30, "hi": 70, **_EXIT_PARAMS}
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        n = int(self.p["n"])
+        now, prev = rsi(bars, i, n), rsi(bars, i - 1, n) if i > 0 else None
+        exits = self._exits(bars, i)
+        if now is None or prev is None or exits is None:
+            return None
+        if now < self.p["lo"]:
+            return Decision(1, *exits)
+        if now > self.p["hi"]:
+            return Decision(-1, *exits)
+        if (prev - 50) * (now - 50) <= 0:
+            return Decision(0)
+        return None
+
+
+class Pullback(Strategy):
+    """Trade dips in the direction of the long SMA trend; flat when RSI crosses 50."""
+
+    name = "pullback"
+    summary = "長期SMAの方向に、RSIが逆に振れた押し目/戻りで入る。RSIが50を跨いだら手仕舞い"
+    params = {"trend": 200, "n": 14, "lo": 30, "hi": 70, **_EXIT_PARAMS}
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        n = int(self.p["n"])
+        trend = sma(bars, i, int(self.p["trend"]))
+        now, prev = rsi(bars, i, n), rsi(bars, i - 1, n) if i > 0 else None
+        exits = self._exits(bars, i)
+        if trend is None or now is None or prev is None or exits is None:
+            return None
+        up = bars[i].close > trend
+        if up and now < self.p["lo"]:
+            return Decision(1, *exits)
+        if not up and now > self.p["hi"]:
+            return Decision(-1, *exits)
+        if (prev - 50) * (now - 50) <= 0:
+            return Decision(0)
+        return None
+
+
+class SessionBreakout(Strategy):
+    """Break of the day's early-session range, traded until a fixed hour, then flat.
+
+    Hours are the data's own clock (MT5 server time). Meant for H1 or shorter bars.
+    Being flat every evening also means never holding over the weekend.
+    """
+
+    name = "session_bo"
+    summary = "その日の rs〜re 時の高値/安値を抜けたら入り、exit_h 時に必ず手仕舞い（時刻はサーバー時刻）"
+    params = {"rs": 0, "re": 8, "exit_h": 20, **_EXIT_PARAMS}
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        rs, re_, exit_h = int(self.p["rs"]), int(self.p["re"]), int(self.p["exit_h"])
+        t = bars[i].time
+        if t.hour >= exit_h or t.hour < re_:
+            return Decision(0)
+        hi = lo = None
+        k = i
+        while k >= 0 and bars[k].time.date() == t.date():
+            if rs <= bars[k].time.hour < re_:
+                hi = bars[k].high if hi is None else max(hi, bars[k].high)
+                lo = bars[k].low if lo is None else min(lo, bars[k].low)
+            k -= 1
+        exits = self._exits(bars, i)
+        if hi is None or lo is None or exits is None:
+            return None
+        if bars[i].close > hi:
+            return Decision(1, *exits)
+        if bars[i].close < lo:
+            return Decision(-1, *exits)
+        return None
+
+
+STRATEGIES: dict[str, type[Strategy]] = {
+    cls.name: cls for cls in (MACross, Breakout, BandRevert, RSIRevert, Pullback, SessionBreakout)
+}
 
 
 def parse_params(text: str | None) -> dict[str, float]:
