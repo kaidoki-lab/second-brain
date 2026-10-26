@@ -51,9 +51,10 @@ def run(
     risk: RiskConfig | None = None,
     initial_equity: float = 1_000_000,
     spread: float = 0.0,
+    slippage: float = 0.0,
 ) -> Result:
     risk = risk or RiskConfig()
-    broker = PaperBroker(initial_equity, spread, risk.quote_to_account)
+    broker = PaperBroker(initial_equity, spread, risk.quote_to_account, slippage)
     guard = DrawdownGuard(risk.max_drawdown_pct)
     result = Result(strategy.describe(), initial_equity, broker.trades)
 

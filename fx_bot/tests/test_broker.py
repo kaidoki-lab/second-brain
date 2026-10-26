@@ -59,6 +59,34 @@ class PaperBrokerTest(unittest.TestCase):
         self.assertAlmostEqual(b.trades[0].exit_price, 97)
         self.assertAlmostEqual(b.trades[0].pnl, 3000)
 
+    def test_slippage_worsens_market_and_stop_fills(self):
+        b = PaperBroker(0, spread=0, slippage=0.1)
+        flat = (100, 100, 100, 100)
+        series = bars([flat, flat, flat, flat, (100, 100, 97, 98)])
+        b.on_bar(series[0])
+        b.open(-1, 1000, stop=5, take=None)
+        b.on_bar(series[1])
+        self.assertAlmostEqual(b.position().entry_price, 99.9)   # short sells lower
+        b.close()
+        b.on_bar(series[2])
+        self.assertAlmostEqual(b.trades[0].exit_price, 100.1)    # buys back higher
+        b.open(1, 1000, stop=2, take=None)
+        b.on_bar(series[3])
+        self.assertAlmostEqual(b.position().stop_price, 98.1)
+        b.on_bar(series[4])
+        self.assertEqual(b.trades[1].reason, "stop")
+        self.assertAlmostEqual(b.trades[1].exit_price, 98.0)     # stop 98.1 filled 0.1 worse
+
+    def test_take_profit_has_no_slippage(self):
+        b = PaperBroker(0, spread=0, slippage=0.1)
+        series = bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 103, 100, 102)])
+        b.on_bar(series[0])
+        b.open(1, 1000, stop=5, take=2)
+        b.on_bar(series[1])
+        b.on_bar(series[2])
+        self.assertEqual(b.trades[0].reason, "take")
+        self.assertAlmostEqual(b.trades[0].exit_price, 102.1)
+
     def test_equity_marks_to_market(self):
         b = PaperBroker(1000, spread=0)
         series = bars([(100, 100, 100, 100), (100, 101, 100, 101)])

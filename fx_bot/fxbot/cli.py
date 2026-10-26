@@ -19,6 +19,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--csv", required=True, help="価格データ (time,open,high,low,close / MT5エクスポート形式)")
     p.add_argument("--symbol", default="USDJPY", help="通貨ペア (pipサイズの判定に使用)")
     p.add_argument("--spread", type=float, default=0.3, help="スプレッド (pips)")
+    p.add_argument("--slippage", type=float, default=0.0, help="成行・損切りの約定が不利にずれる幅 (pips)")
     p.add_argument("--equity", type=float, default=1_000_000, help="初期資金 (口座通貨)")
     _trading(p)
 
@@ -39,7 +40,8 @@ def _risk(args: argparse.Namespace) -> RiskConfig:
 
 def _run(args: argparse.Namespace, bars: list[data.Bar], params: dict[str, float]) -> backtest.Result:
     strat = strategy.build(args.strategy, params)
-    return backtest.run(bars, strat, _risk(args), args.equity, args.spread * pip_size(args.symbol))
+    return backtest.run(bars, strat, _risk(args), args.equity,
+                        args.spread * pip_size(args.symbol), args.slippage * pip_size(args.symbol))
 
 
 def _pad(text: str, width: int) -> str:

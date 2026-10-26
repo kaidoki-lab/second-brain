@@ -56,11 +56,15 @@ class PaperBroker(Broker):
     Orders placed after bar i's close fill at bar i+1's open. Inside a bar,
     if both the stop and the target could have been hit, the stop is assumed
     (pessimistic). Gaps through a stop fill at the open, not at the stop.
+    `slippage` (price units) worsens every market fill: entries, signal/halt
+    exits and stop exits. Take-profit fills are limit orders and get none.
     """
 
-    def __init__(self, initial_equity: float, spread: float, quote_to_account: float = 1.0) -> None:
+    def __init__(self, initial_equity: float, spread: float, quote_to_account: float = 1.0,
+                 slippage: float = 0.0) -> None:
         self.cash = initial_equity
         self.spread = spread
+        self.slippage = slippage
         self.q2a = quote_to_account
         self.trades: list[Trade] = []
         self._pos: Position | None = None
@@ -89,11 +93,12 @@ class PaperBroker(Broker):
         for order in pending:
             if order[0] == "close":
                 if self._pos is not None:
-                    self._exit(bar.time, self._exit_price(self._pos.direction, bar.open), order[1])
+                    d = self._pos.direction
+                    self._exit(bar.time, self._slip(d, self._exit_price(d, bar.open), -1), order[1])
             else:
                 _, direction, units, stop, take = order
                 if self._pos is None and units > 0:
-                    fill = bar.open + self.spread if direction > 0 else bar.open
+                    fill = self._slip(direction, bar.open + self.spread if direction > 0 else bar.open, 1)
                     self._pos = Position(
                         direction, units, bar.time, fill,
                         fill - direction * stop if stop else None,
@@ -107,12 +112,17 @@ class PaperBroker(Broker):
         """Flatten at the last seen close (used when the data runs out)."""
         self._pending = []
         if self._pos is not None and self._last is not None:
-            self._exit(self._last.time, self._exit_price(self._pos.direction, self._last.close), reason)
+            d = self._pos.direction
+            self._exit(self._last.time, self._slip(d, self._exit_price(d, self._last.close), -1), reason)
 
     # -- internals ----------------------------------------------------------
     def _exit_price(self, direction: int, bid: float) -> float:
         # long sells at bid, short buys back at ask
         return bid if direction > 0 else bid + self.spread
+
+    def _slip(self, direction: int, price: float, side: int) -> float:
+        # side +1 = opening, -1 = closing; either way the fill moves against the position
+        return price + side * direction * self.slippage
 
     def _pnl(self, pos: Position, exit_price: float) -> float:
         return pos.direction * (exit_price - pos.entry_price) * pos.units * self.q2a
@@ -134,7 +144,7 @@ class PaperBroker(Broker):
         worst, best = (lo, hi) if d > 0 else (hi, lo)
         if pos.stop_price is not None and d * (worst - pos.stop_price) <= 0:
             gap = d * (o - pos.stop_price) <= 0
-            self._exit(bar.time, o if gap else pos.stop_price, "stop")
+            self._exit(bar.time, self._slip(d, o if gap else pos.stop_price, -1), "stop")
         elif pos.take_price is not None and d * (best - pos.take_price) >= 0:
             gap = d * (o - pos.take_price) >= 0
             self._exit(bar.time, o if gap else pos.take_price, "take")
