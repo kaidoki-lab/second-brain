@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import csv
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .backtest import step
-from .broker import Broker, Position
+from .broker import Broker, Position, Trade
 from .data import Bar
 from .risk import DrawdownGuard, RiskConfig, pip_size
 from .strategy import Strategy
@@ -83,7 +83,8 @@ class MT5Broker(Broker):
 
     With `fills`, every market fill is appended to that CSV with the price asked
     for and the price got, so live slippage can be compared with the backtest's.
-    `slip_pips` is positive when the fill was worse than requested.
+    `slip_pips` is positive when the fill was worse than requested. Stops and
+    targets filled by the server are picked up by `check_server_exits()`.
     """
 
     def __init__(self, mt5: Any, symbol: str, magic: int = MAGIC, deviation: int = 20,
@@ -96,6 +97,7 @@ class MT5Broker(Broker):
         self.fills = Path(fills) if fills else None
         self.info = _symbol(mt5, symbol)
         self.contract = self.info.trade_contract_size
+        self._known: dict[int, Any] = {}     # our open positions as last seen, by ticket
 
     @property
     def unit_step(self) -> int:
@@ -147,15 +149,19 @@ class MT5Broker(Broker):
             detail = f"{result.retcode} {result.comment}" if result is not None else str(self.mt5.last_error())
             raise MT5Error(f"{what} に失敗: {detail}")
         self.log(f"{what}: {request['volume']} lot @ {result.price}")
-        if self.fills is not None:
-            self._record_fill(what, request, result.price, tick)
+        self._record_fill(what, request["type"] == self.mt5.ORDER_TYPE_BUY, request["volume"],
+                          request["price"], result.price, tick)
 
-    def _record_fill(self, what: str, request: dict[str, Any], filled: float, tick: Any) -> None:
+    def _record_fill(self, what: str, buy: bool, volume: float, requested: float, filled: float,
+                     tick: Any = None) -> None:
+        if self.fills is None:
+            return
         pip = pip_size(self.symbol)
-        sign = 1 if request["type"] == self.mt5.ORDER_TYPE_BUY else -1   # paying more on a buy is worse
-        row = (f"{datetime.now():%Y-%m-%d %H:%M:%S}", self.symbol, what, request["volume"], tick.bid, tick.ask,
-               request["price"], filled, round(sign * (filled - request["price"]) / pip, 2),
-               round((tick.ask - tick.bid) / pip, 2))
+        sign = 1 if buy else -1                  # paying more on a buy / getting less on a sell is worse
+        bid, ask = (tick.bid, tick.ask) if tick is not None else ("", "")
+        spread = round((tick.ask - tick.bid) / pip, 2) if tick is not None else ""
+        row = (f"{datetime.now():%Y-%m-%d %H:%M:%S}", self.symbol, what, volume, bid, ask,
+               requested, filled, round(sign * (filled - requested) / pip, 2), spread)
         new = not self.fills.exists()
         self.fills.parent.mkdir(parents=True, exist_ok=True)
         with self.fills.open("a", newline="", encoding="utf-8") as f:
@@ -190,6 +196,57 @@ class MT5Broker(Broker):
                 "price": tick.bid if buy else tick.ask,
                 "position": p.ticket,
             }, f"決済 ({reason})")
+            self._known.pop(p.ticket, None)
+
+    def check_server_exits(self) -> None:
+        """Log and record positions the server closed since the last check (stop / target hit)."""
+        current = {p.ticket: p for p in self._mine()}
+        for ticket, p in self._known.items():
+            if ticket in current:
+                continue
+            deals = self.mt5.history_deals_get(position=ticket) or ()
+            for d in deals:
+                if d.entry != getattr(self.mt5, "DEAL_ENTRY_OUT", 1):
+                    continue
+                if d.reason == getattr(self.mt5, "DEAL_REASON_SL", 4) and p.sl:
+                    what, requested = "損切り (MT5)", p.sl
+                elif d.reason == getattr(self.mt5, "DEAL_REASON_TP", 5) and p.tp:
+                    what, requested = "利確 (MT5)", p.tp
+                else:
+                    what, requested = "決済 (MT5側)", d.price
+                self.log(f"{what}: {d.volume} lot @ {d.price}  損益 {d.profit:+,.0f}")
+                self._record_fill(what, p.type != self.mt5.POSITION_TYPE_BUY, d.volume, requested, d.price)
+        self._known = current
+
+
+def live_trades(mt5: Any, symbol: str, since: datetime, magic: int = MAGIC) -> list[Trade]:
+    """This bot's closed trades from the account history (times are broker server time)."""
+    def server_time(d: Any) -> datetime:
+        return datetime.fromtimestamp(int(d.time), timezone.utc).replace(tzinfo=None)
+
+    deals = mt5.history_deals_get(datetime(2000, 1, 1), datetime.now() + timedelta(days=2)) or ()
+    by_pos: dict[int, list[Any]] = {}
+    for d in deals:
+        if d.symbol == symbol and d.magic == magic:
+            by_pos.setdefault(d.position_id, []).append(d)
+    out_entry = getattr(mt5, "DEAL_ENTRY_OUT", 1)
+    reasons = {getattr(mt5, "DEAL_REASON_SL", 4): "stop", getattr(mt5, "DEAL_REASON_TP", 5): "take"}
+    trades = []
+    for ds in by_pos.values():
+        ins = [d for d in ds if d.entry != out_entry]
+        outs = [d for d in ds if d.entry == out_entry]
+        if not ins or not outs or server_time(ins[0]) < since:
+            continue
+        first, last = ins[0], outs[-1]
+        contract = mt5.symbol_info(symbol).trade_contract_size
+        trades.append(Trade(
+            direction=1 if first.type == mt5.ORDER_TYPE_BUY else -1,
+            units=int(round(first.volume * contract)),
+            entry_time=server_time(first), entry_price=first.price,
+            exit_time=server_time(last), exit_price=last.price,
+            pnl=sum(d.profit for d in outs), reason=reasons.get(last.reason, "signal"),
+        ))
+    return sorted(trades, key=lambda t: t.entry_time)
 
 
 def keep_awake(on: bool) -> bool:
@@ -221,6 +278,7 @@ def run_live(
     sleep: Callable[[float], None] = time.sleep,
     fills: str | Path | None = None,
     stay_awake: bool = False,
+    relink: Callable[[], bool] | None = None,
 ) -> None:
     """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt."""
     if not is_demo(mt5) and not allow_real:
@@ -234,32 +292,68 @@ def run_live(
         log("動作中は PC をスリープさせません" if keep_awake(True)
             else "[注意] スリープ抑止を設定できませんでした。PC がスリープすると止まります")
     try:
-        _loop(mt5, symbol, timeframe, strategy, risk, broker, guard, history, poll, once, log, sleep)
+        _loop(mt5, symbol, timeframe, strategy, risk, broker, guard, history, poll, once, log, sleep,
+              relink or (lambda: reconnect(mt5)), allow_real)
     finally:
         if stay_awake:
             keep_awake(False)
 
 
+RECONNECT_AFTER = 3          # consecutive failed polls before re-initializing the terminal link
+MAX_BACKOFF = 60.0           # seconds between retries while MT5 is unreachable
+
+
+def reconnect(mt5: Any, terminal: str | None = None) -> bool:
+    try:
+        mt5.shutdown()
+    except Exception:  # noqa: BLE001 - a dead link may fail to shut down; we re-initialize anyway
+        pass
+    return bool(mt5.initialize(path=terminal) if terminal else mt5.initialize())
+
+
 def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskConfig, broker: MT5Broker,
           guard: DrawdownGuard, history: int, poll: float, once: bool,
-          log: Callable[[str], None], sleep: Callable[[float], None]) -> None:
+          log: Callable[[str], None], sleep: Callable[[float], None],
+          relink: Callable[[], bool], allow_real: bool) -> None:
+    """Poll for closed bars. Errors (MT5 restarting, a dropped connection) are logged and
+    retried with backoff instead of ending the run; after a few in a row the link is re-initialized."""
     last_seen: datetime | None = None
+    failures = 0
     while True:
-        bars = fetch_bars(mt5, symbol, timeframe, history)
-        if bars[-1].time != last_seen:
-            last_seen = bars[-1].time
-            if guard.update(broker.equity()):
-                log(f"有効証拠金が開始後の最高値から {risk.max_drawdown_pct}% 減ったため、全決済して停止します")
-                broker.close("halt")
-                return
-            before = broker.position()
-            try:
-                step(broker, strategy, bars, len(bars) - 1, risk)
-            except MT5Error as exc:
-                log(f"[注文エラー] {exc}")
-            after = broker.position()
-            state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,}通貨"
-            log(f"{last_seen} 確定 終値 {bars[-1].close}  → {state}" + ("" if before == after else " (変更)"))
+        try:
+            broker.check_server_exits()
+            bars = fetch_bars(mt5, symbol, timeframe, history)
+            if bars[-1].time != last_seen:
+                if guard.update(broker.equity()):
+                    log(f"有効証拠金が開始後の最高値から {risk.max_drawdown_pct}% 減ったため、全決済して停止します")
+                    broker.close("halt")
+                    return
+                before = broker.position()
+                try:
+                    step(broker, strategy, bars, len(bars) - 1, risk)
+                except MT5Error as exc:
+                    log(f"[注文エラー] {exc}")
+                last_seen = bars[-1].time
+                after = broker.position()
+                state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,}通貨"
+                log(f"{last_seen} 確定 終値 {bars[-1].close}  → {state}" + ("" if before == after else " (変更)"))
+            if failures:
+                log(f"[復旧] MT5 との通信が戻りました ({failures} 回失敗のあと)")
+            failures = 0
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:  # noqa: BLE001 - keep the bot alive; the stop order is on the server anyway
+            failures += 1
+            log(f"[接続エラー] {type(exc).__name__}: {exc}  ({failures} 回目)")
+            if failures % RECONNECT_AFTER == 0:
+                ok = relink()
+                log("MT5 に再接続しました" if ok else f"MT5 に再接続できません: {mt5.last_error()}")
+                if ok and not allow_real and not is_demo(mt5):
+                    raise MT5Error("再接続先がリアル口座です。安全のため停止しました") from exc
+            if once:
+                raise
+            sleep(min(poll * 2 ** min(failures, 6), MAX_BACKOFF))
+            continue
         if once:
             return
         sleep(poll)

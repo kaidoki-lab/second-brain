@@ -137,6 +137,14 @@ class StrategyTest(unittest.TestCase):
         self.assertEqual(SessionBreakout(**p).decide(friday, 104).direction, 1)
         self.assertEqual(SessionBreakout(no_fri=1, **p).decide(friday, 104).direction, 0)
 
+    def test_session_breakout_shift_moves_the_clock(self):
+        # the same day seen by a broker one hour ahead: everything one bar later
+        rows = [(100, 100, 100, 100)] + [(100, 101, 99, 100)] * 8 + [(100, 102, 100, 101.5)]
+        series = bars(rows)
+        s = SessionBreakout(rs=0, re=8, exit_h=20, atr=5, shift=-1)
+        self.assertEqual(s.decide(series, 8).direction, 0)      # 08:00 data = 07:00 shifted, still in the range
+        self.assertEqual(s.decide(series, 9).direction, 1)
+
     def test_new_strategies_run_end_to_end(self):
         series = data.synthetic(n=1500, seed=3)
         for name in ("band_revert", "rsi_revert", "pullback", "session_bo"):

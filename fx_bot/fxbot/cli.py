@@ -1,4 +1,4 @@
-"""Command line: sample / strategies / backtest / optimize / fetch / live."""
+"""Command line: sample / strategies / backtest / optimize / fetch / live / compare."""
 
 from __future__ import annotations
 
@@ -140,21 +140,104 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+NOTIFY_KEYS = ("新規", "決済", "損切り", "利確", "エラー", "停止", "再接続", "復旧", "注意")
+
+
+def _notify(url: str, text: str) -> None:
+    """POST one line to a push service such as ntfy.sh. Runs in a thread; failures are ignored."""
+    import threading
+    import urllib.request
+
+    def send() -> None:
+        try:
+            urllib.request.urlopen(urllib.request.Request(url, data=text.encode("utf-8"), method="POST"), timeout=10)
+        except Exception:  # noqa: BLE001 - a missed notification must never stop trading
+            pass
+
+    threading.Thread(target=send, daemon=True).start()
+
+
+def _live_logger(log_dir: str | None, notify_url: str | None):
+    """Console line + data/live_YYYYMMDD.log line; trade/error lines also pushed to `notify_url`."""
+    def log(msg: str) -> None:
+        now = datetime.now()
+        line = f"[{now:%m-%d %H:%M:%S}] {msg}"
+        print(line, flush=True)
+        if log_dir:
+            path = Path(log_dir) / f"live_{now:%Y%m%d}.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        if notify_url and any(k in msg for k in NOTIFY_KEYS):
+            _notify(notify_url, msg)
+    return log
+
+
 def cmd_live(args: argparse.Namespace) -> int:
+    import time
+
     from . import mt5 as mt5link
 
     strat = strategy.build(args.strategy, strategy.parse_params(args.params))
-    mt5 = mt5link.connect(args.terminal)
+    log = _live_logger(args.log_dir or None, args.notify)
+    while True:
+        try:
+            mt5 = mt5link.connect(args.terminal)
+            break
+        except MT5Error as exc:
+            if args.once:
+                raise
+            log(f"[接続エラー] {exc}  60秒後にもう一度試します")
+            time.sleep(60)
     try:
         mt5link.run_live(mt5, args.symbol, args.timeframe, strat, _risk(args),
                          history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
-                         log=lambda msg: print(f"[{datetime.now():%m-%d %H:%M:%S}] {msg}", flush=True),
+                         log=log,
                          fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv",
-                         stay_awake=not args.once)
+                         stay_awake=not args.once, relink=lambda: mt5link.reconnect(mt5, args.terminal))
     except KeyboardInterrupt:
         print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
     finally:
         mt5.shutdown()
+    return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    from . import compare
+    from . import mt5 as mt5link
+
+    since = datetime.strptime(args.since, "%Y-%m-%d")
+    strat = strategy.build(args.strategy, strategy.parse_params(args.params))
+    mt5 = mt5link.connect(args.terminal)
+    try:
+        bars = mt5link.fetch_bars(mt5, args.symbol, args.timeframe, args.history)
+        live = mt5link.live_trades(mt5, args.symbol, since)
+    finally:
+        mt5.shutdown()
+    pip = pip_size(args.symbol)
+    result = backtest.run(bars, strat, _risk(args), args.equity, args.spread * pip, args.slippage * pip)
+    test = [t for t in result.trades if t.entry_time >= since and t.reason != "end"]
+    pairs = compare.match(live, test)
+
+    print(f"{strat.describe()}  {args.symbol} {args.timeframe}  {since:%Y-%m-%d} 以降 (サーバー時刻)")
+    print(f"バックテストの前提: スプレッド {args.spread} pips / 滑り {args.slippage} pips\n")
+    print(f"{'エントリー':<17}{'方向':<4}{'実 入→出':>22}{'BT 入→出':>22}{'入り差':>8}{'出口差':>8}{'実pips':>8}{'BTpips':>8}  決済")
+    for p in pairs:
+        lt, bt = p.live, p.test
+        side = "買い" if (lt or bt).direction > 0 else "売り"
+        fmt = lambda t: f"{t.entry_price:.3f}→{t.exit_price:.3f}" if t else "なし"  # noqa: E731
+        num = lambda v: f"{v:+.1f}" if v is not None else "-"  # noqa: E731
+        print(f"{p.time:%m-%d %H:%M}      {side:<4}{fmt(lt):>22}{fmt(bt):>22}{num(p.entry_gap(pip)):>8}"
+              f"{num(p.exit_gap(pip)):>8}{num(compare.pips(lt, pip) if lt else None):>8}"
+              f"{num(compare.pips(bt, pip) if bt else None):>8}  {(lt or bt).reason}")
+    both = [p for p in pairs if p.live and p.test]
+    print(f"\n一致 {len(both)} 件 / 実だけ {sum(p.test is None for p in pairs)} 件 / バックテストだけ {sum(p.live is None for p in pairs)} 件")
+    if both:
+        avg = lambda xs: sum(xs) / len(xs)  # noqa: E731
+        print(f"入りの差 平均 {avg([p.entry_gap(pip) for p in both]):+.2f} pips / "
+              f"出口の差 平均 {avg([p.exit_gap(pip) for p in both]):+.2f} pips (プラス = 実際の方が不利)")
+    if any(p.live is None or p.test is None for p in pairs):
+        print("※ 片方だけの取引は、判断のずれ（データ・時刻・起動していなかった時間）を疑ってください")
     return 0
 
 
@@ -207,7 +290,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--once", action="store_true", help="1回だけ判断して終了 (動作確認用)")
     p.add_argument("--allow-real", action="store_true", help="リアル口座でも動かす (非推奨)")
     p.add_argument("--fills", help="約定記録CSV (既定: data/fills_<銘柄>.csv、\"\" で記録しない)")
+    p.add_argument("--log-dir", default="data", help="動作ログの保存先 (live_YYYYMMDD.log。\"\" で保存しない)")
+    p.add_argument("--notify", help="売買・エラーを送る通知URL (例: https://ntfy.sh/<自分だけのトピック名>)。既定は送らない")
     p.set_defaults(func=cmd_live)
+
+    p = sub.add_parser("compare", help="デモ/実口座の取引を同じ期間のバックテストと1件ずつ照合")
+    _mt5(p)
+    _trading(p)
+    p.add_argument("--params", help="live と同じパラメータ")
+    p.add_argument("--since", required=True, help="この日以降の取引を比べる (YYYY-MM-DD、サーバー時刻)")
+    p.add_argument("--history", type=int, default=3000, help="バックテストに使う足の本数 (指標の助走込み)")
+    p.add_argument("--spread", type=float, default=0.3, help="バックテストのスプレッド (pips)")
+    p.add_argument("--slippage", type=float, default=0.0, help="バックテストの滑り (pips)")
+    p.add_argument("--equity", type=float, default=100_000, help="バックテストの初期資金")
+    p.set_defaults(func=cmd_compare)
 
     args = parser.parse_args(argv)
     try:

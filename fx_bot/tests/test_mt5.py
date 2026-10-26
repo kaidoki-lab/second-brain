@@ -208,6 +208,54 @@ class RunLiveTest(unittest.TestCase):
         self.assertIn("position", fake.requests[-1])
         self.assertEqual(fake.positions, [])
 
+    def test_lost_connection_retries_and_relinks(self):
+        fake = FakeMT5()
+        rates = fake.copy_rates_from_pos
+        down = {"left": 4}
+        relinks, waits, logs = [], [], []
+
+        def flaky(*a):
+            if down["left"] > 0:
+                down["left"] -= 1
+                return None                  # what MT5 returns while the terminal is gone
+            return rates(*a)
+
+        def sleep(s):
+            waits.append(s)
+            if len(waits) == 6:
+                raise KeyboardInterrupt
+
+        fake.copy_rates_from_pos = flaky
+        with self.assertRaises(KeyboardInterrupt):
+            link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), log=logs.append, sleep=sleep,
+                          relink=lambda: relinks.append(1) or True)
+        self.assertEqual(len(relinks), 1)                     # after 3 failures in a row
+        self.assertEqual(waits[:4], [10.0, 20.0, 40.0, 60.0])  # backoff, capped
+        self.assertTrue(any("復旧" in m for m in logs))
+        self.assertEqual(len(fake.requests), 1)               # traded once it came back
+
+    def test_server_side_stop_is_logged_and_recorded(self):
+        fake = FakeMT5()
+        fake.DEAL_ENTRY_OUT, fake.DEAL_REASON_SL = 1, 4
+        fake.history_deals_get = lambda position: (
+            NS(entry=0, reason=0, volume=0.2, price=150.003, profit=0),
+            NS(entry=1, reason=4, volume=0.2, price=149.498, profit=-10_100),
+        )
+        logs = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fills.csv"
+            b = link.MT5Broker(fake, "USDJPY", log=logs.append, fills=path)
+            b.open(1, 20_000, stop=0.5, take=None)
+            b.check_server_exits()                    # sees the position
+            fake.positions = []                       # the server hits the stop at 149.503 -> filled 149.498
+            b.check_server_exits()
+            with path.open(encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        self.assertEqual(rows[-1]["action"], "損切り (MT5)")
+        self.assertEqual(float(rows[-1]["requested"]), 149.503)
+        self.assertEqual(float(rows[-1]["slip_pips"]), 0.5)
+        self.assertTrue(any("損切り" in m for m in logs))
+
 
 if __name__ == "__main__":
     unittest.main()

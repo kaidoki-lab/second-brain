@@ -29,6 +29,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 | `mt5_fetch.bat` | `python run.py fetch --symbol USDJPY --timeframe H1` | 過去データを `data/USDJPY_H1.csv` に保存 |
 | `mt5_demo.bat` | `python run.py live --symbol USDJPY --timeframe H1 --strategy ma_cross` | デモ口座で自動売買 |
 | `mt5_session_bo.bat` | `python run.py live ... --strategy session_bo --risk 0.5 --params ...,side=1,no_fri=1` | USDJPY の session_bo（買いのみ・金曜休み）をデモで前進テスト |
+| `autostart_on.bat` / `autostart_off.bat` | — | サインイン時に `mt5_session_bo.bat` を自動起動する／やめる（スタートアップのショートカット） |
 
 `live` の動き:
 
@@ -37,7 +38,11 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 - 自分の注文には目印（マジックナンバー）を付け、**手動で持っているポジションには触りません**
 - 開始後の最高値から `--max-dd`% 有効証拠金が減ったら全決済して終了
 - Ctrl+C で停止（ポジションは残る）。`--once` で1回だけ判断して終了（動作確認用）
-- 成行の約定は `data/fills_<銘柄>.csv` に「頼んだ価格・約定価格・滑り(pips)・スプレッド」を1行ずつ残します（`--fills ""` で無効）。MT5 側で約定した損切りは記録されないので、MT5 の履歴で確認します
+- 約定は `data/fills_<銘柄>.csv` に「頼んだ価格・約定価格・滑り(pips)・スプレッド」を1行ずつ残します（`--fills ""` で無効）。MT5 側で約定した損切り・利確も、損切り価格との差を記録します
+- 動作ログは画面と `data/live_YYYYMMDD.log` の両方に出ます（`--log-dir` で変更）
+- MT5 との通信が切れても終了せず、待ち時間を延ばしながら取り直し、3回続けて失敗したら再接続します。起動時に MT5 につながらないときも1分おきに待ちます
+- 常駐中は Windows のスリープを抑止します（電源設定は変えません。カバーを閉じる・電池切れでは止まります）
+- `--notify https://ntfy.sh/<自分だけのトピック名>` を付けると、売買・エラーをスマホに通知します（既定は送りません）
 - リアル口座だと起動を拒否します（`--allow-real` で解除できますが、デモで十分確かめてから）
 
 `pip install MetaTrader5` が失敗するときは、その Python のバージョンにまだ対応していない可能性があります。
@@ -69,6 +74,7 @@ python run.py backtest --csv data/EURUSD_H1.csv --symbol EURUSD --spread 0.4 --q
 | `backtest` | 1つの設定で検証。`--params fast=10,slow=40` `--trades out.csv` |
 | `optimize` | パラメータ総当たり。前半70%で選び、残り30%で**期間外検証**して過剰最適化を見抜く |
 | `sample` | 合成データ作成 |
+| `compare` | デモ口座の取引を、同じ期間のバックテストと1件ずつ照合（入り・出口の差 pips、片方だけの取引）。MT5 が必要。例: `python run.py compare --strategy session_bo --params ... --since 2026-10-27` |
 
 共通オプション: `--slippage`（成行・損切りの滑り pips, 既定 0）`--equity`（初期資金, 既定 100万）`--risk`（1回の損失許容 %, 既定 1）`--leverage`（既定 25）`--max-dd`（停止ライン %, 既定 20）
 
@@ -85,7 +91,7 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 | `band_revert` | 移動平均から標準偏差 k 個分以上離れたら逆張り、平均を跨いだら手仕舞い | `n` `k` |
 | `rsi_revert` | RSI が `lo` 未満で買い・`hi` 超で売り、50 を跨いだら手仕舞い | `n` `lo` `hi` |
 | `pullback` | 終値が長期SMA(`trend`)より上なら RSI の押し目で買い、下なら戻りで売り。RSI が 50 を跨いだら手仕舞い | `trend` `n` `lo` `hi` |
-| `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け）。`side=1` で買いのみ・`-1` で売りのみ、`no_fri=1` で金曜は休む | `rs` `re` `exit_h` `side` `no_fri` |
+| `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け）。`side=1` で買いのみ・`-1` で売りのみ、`no_fri=1` で金曜は休む。`shift` は時計のずらし（業者が1時間進んでいれば `-1`） | `rs` `re` `exit_h` `side` `no_fri` `shift` |
 
 どれも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
 
@@ -113,6 +119,7 @@ fxbot/
   backtest.py    step(): 1本ごとの判断→発注。run(): 過去データを流す
   mt5.py         MT5 から過去データ取得 / MT5Broker / 自動売買ループ
   metrics.py     成績集計
+  compare.py     実際の取引とバックテストの照合
   cli.py         コマンド
 ```
 
