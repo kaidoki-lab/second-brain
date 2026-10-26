@@ -159,6 +159,18 @@ class RunLiveTest(unittest.TestCase):
         # 1% of 1,000,000 / 0.5 stop = 20,000 units = 0.2 lot
         self.assertEqual(fake.requests[-1]["volume"], 0.2)
 
+    def test_stay_awake_is_requested_and_released(self):
+        calls = []
+        original = link.keep_awake
+        link.keep_awake = lambda on: calls.append(on) or True
+        try:
+            link.run_live(FakeMT5(), "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=lambda m: None,
+                          stay_awake=True)
+            link.run_live(FakeMT5(), "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=lambda m: None)
+        finally:
+            link.keep_awake = original
+        self.assertEqual(calls, [True, False])
+
     def test_acts_once_per_new_bar_and_reverses(self):
         fake = FakeMT5()
         strat = Fixed(1)

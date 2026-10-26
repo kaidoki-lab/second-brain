@@ -149,7 +149,8 @@ def cmd_live(args: argparse.Namespace) -> int:
         mt5link.run_live(mt5, args.symbol, args.timeframe, strat, _risk(args),
                          history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
                          log=lambda msg: print(f"[{datetime.now():%m-%d %H:%M:%S}] {msg}", flush=True),
-                         fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv")
+                         fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv",
+                         stay_awake=not args.once)
     except KeyboardInterrupt:
         print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
     finally:

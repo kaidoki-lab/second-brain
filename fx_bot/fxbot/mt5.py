@@ -192,6 +192,21 @@ class MT5Broker(Broker):
             }, f"決済 ({reason})")
 
 
+def keep_awake(on: bool) -> bool:
+    """Ask Windows not to idle-sleep while the bot runs (the display may still turn off).
+
+    Only a request held by this process: no power setting is changed, and it ends
+    with the process. Closing a laptop lid or a manual sleep still stops the bot.
+    """
+    try:
+        import ctypes
+        es_continuous, es_system_required = 0x80000000, 0x00000001
+        flags = es_continuous | (es_system_required if on else 0)
+        return bool(ctypes.windll.kernel32.SetThreadExecutionState(flags))  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return False
+
+
 def run_live(
     mt5: Any,
     symbol: str,
@@ -205,6 +220,7 @@ def run_live(
     log: Callable[[str], None] = print,
     sleep: Callable[[float], None] = time.sleep,
     fills: str | Path | None = None,
+    stay_awake: bool = False,
 ) -> None:
     """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt."""
     if not is_demo(mt5) and not allow_real:
@@ -214,7 +230,19 @@ def run_live(
     guard = DrawdownGuard(risk.max_drawdown_pct)
     log(account_summary(mt5))
     log(f"{strategy.describe()}  {symbol} {timeframe}  開始 (Ctrl+C で停止。ポジションはそのまま残ります)")
+    if stay_awake:
+        log("動作中は PC をスリープさせません" if keep_awake(True)
+            else "[注意] スリープ抑止を設定できませんでした。PC がスリープすると止まります")
+    try:
+        _loop(mt5, symbol, timeframe, strategy, risk, broker, guard, history, poll, once, log, sleep)
+    finally:
+        if stay_awake:
+            keep_awake(False)
 
+
+def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskConfig, broker: MT5Broker,
+          guard: DrawdownGuard, history: int, poll: float, once: bool,
+          log: Callable[[str], None], sleep: Callable[[float], None]) -> None:
     last_seen: datetime | None = None
     while True:
         bars = fetch_bars(mt5, symbol, timeframe, history)
