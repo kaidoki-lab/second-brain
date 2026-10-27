@@ -152,7 +152,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
-NOTIFY_KEYS = ("新規", "決済", "損切り", "利確", "エラー", "停止", "再接続", "復旧", "注意")
+NOTIFY_KEYS = ("新規", "決済", "損切り", "利確", "エラー", "停止", "再接続", "復旧", "注意", "日報", "再開")
 
 
 def _notify(url: str, text: str) -> None:
@@ -185,6 +185,31 @@ def _live_logger(log_dir: str | None, notify_url: str | None):
     return log
 
 
+def _pinger(url: str | None, every: float = 300.0):
+    """GET `url` at most every `every` seconds (a dead-man's switch such as healthchecks.io)."""
+    if not url:
+        return None
+    import time
+    last = [0.0]
+
+    def ping() -> None:
+        if time.monotonic() - last[0] >= every:
+            last[0] = time.monotonic()
+            _notify(url, "")
+    return ping
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    from .watch import run_watch
+
+    log = _live_logger(args.log_dir or None, args.notify)
+    try:
+        run_watch(args.dir, args.stale, args.interval, log, once=args.once)
+    except KeyboardInterrupt:
+        print("見張りを止めました。")
+    return 0
+
+
 def cmd_live(args: argparse.Namespace) -> int:
     import time
 
@@ -201,13 +226,15 @@ def cmd_live(args: argparse.Namespace) -> int:
                 raise
             log(f"[接続エラー] {exc}  60秒後にもう一度試します")
             time.sleep(60)
+    state = args.state if args.state is not None else str(Path(args.log_dir or "data") / f"state_{args.symbol}_{args.magic}.json")
     try:
         mt5link.run_live(mt5, args.symbol, args.timeframe, strat, _risk(args),
                          history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
                          log=log,
                          fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv",
                          stay_awake=not args.once, relink=lambda: mt5link.reconnect(mt5, args.terminal),
-                         magic=args.magic)
+                         magic=args.magic, limits=mt5link.LossLimit(args.max_day_loss, args.max_week_loss),
+                         state=state or None, heartbeat=_pinger(args.heartbeat_url))
     except KeyboardInterrupt:
         print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
     finally:
@@ -310,7 +337,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fills", help="約定記録CSV (既定: data/fills_<銘柄>.csv、\"\" で記録しない)")
     p.add_argument("--log-dir", default="data", help="動作ログの保存先 (live_YYYYMMDD.log。\"\" で保存しない)")
     p.add_argument("--notify", help="売買・エラーを送る通知URL (例: https://ntfy.sh/<自分だけのトピック名>)。既定は送らない")
+    p.add_argument("--max-day-loss", type=float, default=0.0,
+                   help="この目印の1日の損失が残高のこの%%に達したら決済し、翌日(サーバー時刻)まで新規を止める (0 で無効)")
+    p.add_argument("--max-week-loss", type=float, default=0.0, help="同じく1週間 (月曜始まり) の上限%% (0 で無効)")
+    p.add_argument("--state", help="状態ファイル (既定: <log-dir>/state_<銘柄>_<目印>.json、\"\" で書かない)。watch と再起動時の照合に使う")
+    p.add_argument("--heartbeat-url", help="5分おきにアクセスするURL (healthchecks.io など。途絶えたら先方が知らせる)")
     p.set_defaults(func=cmd_live)
+
+    p = sub.add_parser("watch", help="live の状態ファイルを見張り、更新が止まったボットを知らせる")
+    p.add_argument("--dir", default="data", help="state_*.json を探すフォルダ (下の階層も見る)")
+    p.add_argument("--stale", type=float, default=10.0, help="この分数更新がなければ停止の疑いとする")
+    p.add_argument("--interval", type=float, default=60.0, help="確認の間隔 (秒)")
+    p.add_argument("--once", action="store_true", help="一覧を1回出して終了")
+    p.add_argument("--log-dir", default="data/watch", help="見張りのログの保存先")
+    p.add_argument("--notify", help="停止の疑い・復旧を送る通知URL")
+    p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("compare", help="デモ/実口座の取引を同じ期間のバックテストと1件ずつ照合")
     _mt5(p)

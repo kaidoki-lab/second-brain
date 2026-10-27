@@ -52,6 +52,11 @@ class FakeMT5:
     def positions_get(self, symbol=None):
         return tuple(self.positions)
 
+    deals = ()
+
+    def history_deals_get(self, *span, position=None):
+        return tuple(d for d in self.deals if position is None or getattr(d, "position_id", None) == position)
+
     def last_error(self):
         return (0, "ok")
 
@@ -260,6 +265,102 @@ class RunLiveTest(unittest.TestCase):
         self.assertEqual(float(rows[-1]["requested"]), 149.503)
         self.assertEqual(float(rows[-1]["slip_pips"]), 0.5)
         self.assertTrue(any("損切り" in m for m in logs))
+
+
+T0 = 1_700_000_000                       # 2023-11-14 22:13 (server time); bar k closes at T0 + k*3600
+
+
+def deal(hours, profit, magic=link.MAGIC, symbol="USDJPY", **kw):
+    return NS(time=T0 + hours * 3600, profit=profit, swap=0.0, commission=0.0, magic=magic, symbol=symbol,
+              entry=1, reason=0, volume=0.2, price=150.0, **kw)
+
+
+class LossLimitTest(unittest.TestCase):
+    def broker(self, fake):
+        return link.MT5Broker(fake, "USDJPY", log=lambda m: None)
+
+    def test_day_limit_closes_and_pauses_until_next_day(self):
+        fake = FakeMT5()
+        b = self.broker(fake)
+        b.open(1, 20_000, stop=0.5, take=None)
+        fake.positions[0].profit = -6_000
+        fake.deals = (deal(0, -5_000), deal(0, -50_000, magic=999))     # another bot's loss does not count
+        lim, logs = link.LossLimit(day_pct=1.0), []
+        now = link._server_time(T0)                                         # 11-14 22:13
+        self.assertTrue(lim.check(b, now, logs.append))                     # 5,000 + 6,000 >= 10,000
+        self.assertEqual(fake.positions, [])
+        self.assertEqual(lim.paused_until, link._server_time(T0).replace(hour=0, minute=0, second=0) + link.timedelta(days=1))
+        self.assertTrue(lim.check(b, now + link.timedelta(hours=1), logs.append))
+        self.assertFalse(lim.check(b, lim.paused_until, logs.append))
+        self.assertTrue(any("[日報] 2023-11-14 の確定損益 -5,000" in m for m in logs))
+        self.assertTrue(any("[再開]" in m for m in logs))
+
+    def test_under_limit_and_off(self):
+        fake = FakeMT5()
+        fake.deals = (deal(0, -9_000),)
+        now = link._server_time(T0)
+        self.assertFalse(link.LossLimit(day_pct=1.0).check(self.broker(fake), now, lambda m: None))
+        fake.deals = (deal(0, -90_000),)
+        self.assertFalse(link.LossLimit().check(self.broker(fake), now, lambda m: None))
+
+    def test_week_limit_counts_earlier_days(self):
+        fake = FakeMT5()
+        fake.deals = (deal(-24, -12_000), deal(0, -9_000), deal(-24 * 3, -40_000))   # Mon, Tue / the Sat before
+        lim, logs = link.LossLimit(day_pct=1.0, week_pct=2.0), []
+        self.assertTrue(lim.check(self.broker(fake), link._server_time(T0), logs.append))
+        self.assertEqual(lim.paused_until.weekday(), 0)                      # next Monday 00:00
+        self.assertTrue(any("今週" in m for m in logs))
+
+    def test_paused_bot_skips_new_entries(self):
+        fake = FakeMT5()
+        fake.deals = (deal(29, -20_000),)                                    # the last bar's day
+        logs = []
+        link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=logs.append,
+                      limits=link.LossLimit(day_pct=1.0))
+        self.assertEqual(fake.requests, [])
+        self.assertTrue(any("損失上限で停止中" in m for m in logs))
+
+
+class StateTest(unittest.TestCase):
+    def test_state_written_each_poll_and_marked_stopped(self):
+        fake = FakeMT5()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=lambda m: None, state=path)
+            import json
+            s = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(s["stopped"])
+        self.assertEqual((s["symbol"], s["magic"]), ("USDJPY", link.MAGIC))
+        self.assertEqual(len(s["positions"]), 1)
+        self.assertEqual(s["positions"][0]["sl"], 149.503)
+
+    def test_restart_reports_stop_hit_while_away_and_restores_pause(self):
+        fake = FakeMT5()
+        fake.DEAL_ENTRY_OUT, fake.DEAL_REASON_SL = 1, 4
+        fake.deals = (NS(position_id=7, entry=1, reason=4, volume=0.2, price=149.49, profit=-10_200,
+                         time=T0, magic=link.MAGIC, symbol="USDJPY", swap=0.0, commission=0.0),)
+        fake.positions.append(NS(ticket=99, type=0, volume=1.0, time=0, price_open=150, sl=0, tp=0, magic=0))
+        logs = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            import json
+            path.write_text(json.dumps({
+                "updated": "2023-11-14T20:00:00", "paused_until": "2099-01-01T00:00:00",
+                "positions": [{"ticket": 7, "type": 0, "volume": 0.2, "price_open": 150.0, "sl": 149.5, "tp": 0}],
+            }), encoding="utf-8")
+            link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=logs.append, state=path)
+        self.assertTrue(any("損切り (MT5)" in m and "-10,200" in m for m in logs))
+        self.assertTrue(any("停止を引き継ぎ" in m for m in logs))
+        self.assertTrue(any("目印の違うポジションが 1 件" in m for m in logs))
+        self.assertEqual(fake.requests, [])                                  # still paused
+
+    def test_warns_about_position_without_stop(self):
+        fake = FakeMT5()
+        fake.positions.append(NS(ticket=5, type=1, volume=0.1, time=0, price_open=150, sl=0, tp=0, magic=link.MAGIC))
+        logs = []
+        link.reconcile(link.MT5Broker(fake, "USDJPY", log=logs.append), None, link.LossLimit(), logs.append)
+        self.assertTrue(any("引き継ぎ: 売り 0.1 lot" in m for m in logs))
+        self.assertTrue(any("損切りが置かれていない" in m for m in logs))
 
 
 if __name__ == "__main__":

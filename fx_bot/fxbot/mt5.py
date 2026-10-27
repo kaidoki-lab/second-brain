@@ -8,9 +8,12 @@ pass a fake; real callers use `connect()`.
 from __future__ import annotations
 
 import csv
+import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from .backtest import step
@@ -55,6 +58,10 @@ def _symbol(mt5: Any, symbol: str) -> Any:
     if not info.visible and not mt5.symbol_select(symbol, True):
         raise MT5Error(f"銘柄 {symbol!r} を気配値表示に追加できません")
     return info
+
+
+def _server_time(epoch: int) -> datetime:
+    return datetime.fromtimestamp(int(epoch), timezone.utc).replace(tzinfo=None)
 
 
 def fetch_bars(mt5: Any, symbol: str, timeframe: str, count: int) -> list[Bar]:
@@ -111,6 +118,31 @@ class MT5Broker(Broker):
 
     def equity(self) -> float:
         return float(self.mt5.account_info().equity)
+
+    def balance(self) -> float:
+        return float(self.mt5.account_info().balance)
+
+    def server_now(self, fallback: datetime) -> datetime:
+        """Broker server time from the last tick; `fallback` when the tick has none."""
+        tick = self.mt5.symbol_info_tick(self.symbol)
+        t = getattr(tick, "time", 0) if tick is not None else 0
+        return _server_time(t) if t else fallback
+
+    def realized(self, start: datetime, end: datetime | None = None) -> float:
+        """Closed P&L (profit + swap + commission) of our deals in [start, end), broker server time."""
+        deals = self.mt5.history_deals_get(start - timedelta(days=1), datetime.now() + timedelta(days=2)) or ()
+        total = 0.0
+        for d in deals:
+            if d.symbol != self.symbol or d.magic != self.magic:
+                continue
+            t = _server_time(d.time)
+            if t >= start and (end is None or t < end):
+                total += d.profit + getattr(d, "swap", 0.0) + getattr(d, "commission", 0.0)
+        return total
+
+    def floating(self) -> float:
+        """Open P&L of our positions, swap included."""
+        return sum(getattr(p, "profit", 0.0) + getattr(p, "swap", 0.0) for p in self._mine())
 
     def _mine(self) -> list[Any]:
         return [p for p in (self.mt5.positions_get(symbol=self.symbol) or ()) if p.magic == self.magic]
@@ -264,6 +296,100 @@ def keep_awake(on: bool) -> bool:
         return False
 
 
+class LossLimit:
+    """Pauses new entries for the rest of the server day / week once this bot's own loss
+    (our closed deals since the period began + our open P&L) reaches the limit, after
+    closing our position. Limits are % of the account balance; 0 turns one off. Other bots
+    on the same account do not count. Also logs a one-line report when the server day changes."""
+
+    def __init__(self, day_pct: float = 0.0, week_pct: float = 0.0) -> None:
+        self.day_pct = day_pct
+        self.week_pct = week_pct
+        self.day: datetime | None = None
+        self.paused_until: datetime | None = None
+
+    def check(self, broker: MT5Broker, now: datetime, log: Callable[[str], None]) -> bool:
+        """True while new entries are paused."""
+        day = datetime(now.year, now.month, now.day)
+        week = day - timedelta(days=day.weekday())
+        if self.day is not None and day != self.day:
+            log(f"[日報] {self.day:%Y-%m-%d} の確定損益 {broker.realized(self.day, day):+,.0f}  "
+                f"有効証拠金 {broker.equity():,.0f}")
+        self.day = day
+        if self.paused_until is not None:
+            if now < self.paused_until:
+                return True
+            log("[再開] 損失上限による停止期間が終わりました。新規の判断を再開します")
+            self.paused_until = None
+        if self.day_pct <= 0 and self.week_pct <= 0:
+            return False
+        floating = broker.floating()
+        balance = broker.balance()
+        for pct, start, until, label in ((self.day_pct, day, day + timedelta(days=1), "本日"),
+                                         (self.week_pct, week, week + timedelta(days=7), "今週")):
+            if pct <= 0:
+                continue
+            loss = -(broker.realized(start) + floating)
+            if loss >= balance * pct / 100:
+                log(f"[停止] {label}の損失 {loss:,.0f} が上限 {pct}% ({balance * pct / 100:,.0f}) に達しました。"
+                    f"決済して {until:%m-%d %H:%M}（サーバー時刻）まで新規を止めます")
+                broker.close("loss-limit")
+                self.paused_until = until
+                return True
+        return False
+
+
+STATE_FIELDS = ("ticket", "type", "volume", "price_open", "sl", "tp")
+
+
+def write_state(path: Path, broker: MT5Broker, timeframe: str, strategy: Strategy, limits: LossLimit,
+                stopped: bool = False) -> None:
+    """Heartbeat for `watch` and memory for the next start: our positions, pause, last update."""
+    try:
+        positions = broker._mine()
+    except Exception:  # noqa: BLE001 - MT5 gone at shutdown: keep what we saw last
+        positions = list(broker._known.values())
+    state = {
+        "updated": datetime.now().isoformat(timespec="seconds"), "pid": os.getpid(), "stopped": stopped,
+        "symbol": broker.symbol, "timeframe": timeframe, "magic": broker.magic, "strategy": strategy.describe(),
+        "paused_until": limits.paused_until.isoformat() if limits.paused_until else None,
+        "positions": [{k: getattr(p, k) for k in STATE_FIELDS} for p in positions],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def reconcile(broker: MT5Broker, state: Path | None, limits: LossLimit, log: Callable[[str], None]) -> None:
+    """At start: report what the server did while we were stopped, then what we take over."""
+    prev = None
+    if state is not None and state.exists():
+        try:
+            prev = json.loads(state.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            log(f"[注意] 前回の記録 {state} を読めません: {exc}")
+    if prev:
+        log(f"前回の記録: {prev.get('updated')} 時点でポジション {len(prev.get('positions', []))} 件")
+        broker._known = {int(d["ticket"]): SimpleNamespace(**d) for d in prev.get("positions", [])}
+        if prev.get("paused_until"):
+            limits.paused_until = datetime.fromisoformat(prev["paused_until"])
+            log(f"損失上限による停止を引き継ぎます ({limits.paused_until:%m-%d %H:%M} まで)")
+    broker.check_server_exits()          # logs stops hit while we were away, then holds the current ones
+    mine = list(broker._known.values())
+    buy = getattr(broker.mt5, "POSITION_TYPE_BUY", 0)
+    for p in mine:
+        log(f"引き継ぎ: {'買い' if p.type == buy else '売り'} {p.volume} lot @ {p.price_open}  "
+            f"損切り {p.sl or 'なし'}  利確 {p.tp or 'なし'}")
+    if len(mine) > 1:
+        log(f"[注意] 目印 {broker.magic} のポジションが {len(mine)} 件あります。決済はまとめて行います")
+    if any(not p.sl for p in mine):
+        log("[注意] 損切りが置かれていないポジションがあります。MT5 で確認してください")
+    others = [p for p in (broker.mt5.positions_get(symbol=broker.symbol) or ()) if p.magic != broker.magic]
+    if others:
+        log(f"同じ銘柄に目印の違うポジションが {len(others)} 件あります（手動・別の戦略。触りません）")
+
+
 def run_live(
     mt5: Any,
     symbol: str,
@@ -280,13 +406,22 @@ def run_live(
     stay_awake: bool = False,
     relink: Callable[[], bool] | None = None,
     magic: int = MAGIC,
+    limits: LossLimit | None = None,
+    state: str | Path | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> None:
-    """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt."""
+    """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt.
+
+    `limits` pauses entries after a day's / week's loss, `state` is a JSON file rewritten
+    every poll (read back at the next start, and by `watch`), `heartbeat` is called after
+    every poll that reached MT5."""
     if not is_demo(mt5) and not allow_real:
         raise MT5Error("リアル口座です。安全のため停止しました (どうしても動かす場合のみ --allow-real)")
     broker = MT5Broker(mt5, symbol, magic=magic, log=log, fills=fills)
     risk.lot_step = broker.unit_step
     guard = DrawdownGuard(risk.max_drawdown_pct)
+    limits = limits or LossLimit()
+    state_path = Path(state) if state else None
     log(account_summary(mt5))
     log(f"{strategy.describe()}  {symbol} {timeframe}  開始 (Ctrl+C で停止。ポジションはそのまま残ります)")
     if magic != MAGIC:
@@ -294,15 +429,30 @@ def run_live(
     if strategy.name == "carry":
         log(f"業者のスワップ (MT5 の表示値): 買い {getattr(broker.info, 'swap_long', '?')} / "
             f"売り {getattr(broker.info, 'swap_short', '?')}  ※ 受け取れる側と carry の方向が合っているか確認してください")
+    if limits.day_pct > 0 or limits.week_pct > 0:
+        log(f"損失上限: 1日 {limits.day_pct or 'なし'}% / 1週間 {limits.week_pct or 'なし'}%（この目印の損益だけで判断）")
+    reconcile(broker, state_path, limits, log)
     if stay_awake:
         log("動作中は PC をスリープさせません" if keep_awake(True)
             else "[注意] スリープ抑止を設定できませんでした。PC がスリープすると止まります")
+
+    def alive() -> None:
+        if state_path is not None:
+            write_state(state_path, broker, timeframe, strategy, limits)
+        if heartbeat is not None:
+            heartbeat()
+
     try:
         _loop(mt5, symbol, timeframe, strategy, risk, broker, guard, history, poll, once, log, sleep,
-              relink or (lambda: reconnect(mt5)), allow_real)
+              relink or (lambda: reconnect(mt5)), allow_real, limits, alive)
     finally:
         if stay_awake:
             keep_awake(False)
+        if state_path is not None:
+            try:
+                write_state(state_path, broker, timeframe, strategy, limits, stopped=True)
+            except Exception:  # noqa: BLE001 - MT5 may be gone; the stale file then reads as stopped by watch
+                pass
 
 
 RECONNECT_AFTER = 3          # consecutive failed polls before re-initializing the terminal link
@@ -320,7 +470,8 @@ def reconnect(mt5: Any, terminal: str | None = None) -> bool:
 def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskConfig, broker: MT5Broker,
           guard: DrawdownGuard, history: int, poll: float, once: bool,
           log: Callable[[str], None], sleep: Callable[[float], None],
-          relink: Callable[[], bool], allow_real: bool) -> None:
+          relink: Callable[[], bool], allow_real: bool, limits: LossLimit,
+          alive: Callable[[], None]) -> None:
     """Poll for closed bars. Errors (MT5 restarting, a dropped connection) are logged and
     retried with backoff instead of ending the run; after a few in a row the link is re-initialized."""
     last_seen: datetime | None = None
@@ -329,20 +480,28 @@ def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskC
         try:
             broker.check_server_exits()
             bars = fetch_bars(mt5, symbol, timeframe, history)
+            try:
+                paused = limits.check(broker, broker.server_now(bars[-1].time), log)
+            except MT5Error as exc:
+                log(f"[注文エラー] {exc}")
+                paused = True
             if bars[-1].time != last_seen:
                 if guard.update(broker.equity()):
                     log(f"有効証拠金が開始後の最高値から {risk.max_drawdown_pct}% 減ったため、全決済して停止します")
                     broker.close("halt")
                     return
                 before = broker.position()
-                try:
-                    step(broker, strategy, bars, len(bars) - 1, risk)
-                except MT5Error as exc:
-                    log(f"[注文エラー] {exc}")
+                if not paused:
+                    try:
+                        step(broker, strategy, bars, len(bars) - 1, risk)
+                    except MT5Error as exc:
+                        log(f"[注文エラー] {exc}")
                 last_seen = bars[-1].time
                 after = broker.position()
                 state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,}通貨"
-                log(f"{last_seen} 確定 終値 {bars[-1].close}  → {state}" + ("" if before == after else " (変更)"))
+                log(f"{last_seen} 確定 終値 {bars[-1].close}  → {state}" + ("" if before == after else " (変更)")
+                    + ("  ※損失上限で停止中" if paused else ""))
+            alive()
             if failures:
                 log(f"[復旧] MT5 との通信が戻りました ({failures} 回失敗のあと)")
             failures = 0
