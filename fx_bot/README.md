@@ -96,8 +96,9 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 | `rsi_revert` | RSI が `lo` 未満で買い・`hi` 超で売り、50 を跨いだら手仕舞い | `n` `lo` `hi` |
 | `pullback` | 終値が長期SMA(`trend`)より上なら RSI の押し目で買い、下なら戻りで売り。RSI が 50 を跨いだら手仕舞い | `trend` `n` `lo` `hi` |
 | `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け）。`side=1` で買いのみ・`-1` で売りのみ、`no_fri=1` で金曜は休む。`shift` は時計のずらし（業者が1時間進んでいれば `-1`） | `rs` `re` `exit_h` `side` `no_fri` `shift` |
-
 | `carry` | スワップが受け取れる側に持ち続け、終値が `regime` 本SMAより不利側に来たら降りる（日足向け）。方向は金利表で自動（業者の取り分 `cut` を引いた受け取りが `edge` 未満なら持たない）。`side=1/-1` で固定。既定の損切りは ATR(20)×5 の遠い保険 | `regime` `edge` `cut` `side` |
+
+| `combo` | 入る合図 `sig`（1 MACD がシグナル線を交差 / 2 ストキャスの %K が %D を `lo` 未満で上抜け・`hi` 超で下抜け / 3 パラボリックSARの反転 / 4 一目の転換線が基準線を交差 / 5 EMA(`fast`)×EMA(`slow`)）を、地合い `flt`（0 なし / 1 ADX≧`adx` かつ DI が同じ向き / 2 ADX<`adx` / 3 終値が SMA(`trend`) の同じ側 / 4 終値が一目の雲の外の同じ側）で絞る。フィルターに止められた合図では手仕舞い。`side` で片方向のみ | `sig` `flt` `fast` `slow` `signal` `k` `lo` `hi` `adx_n` `adx` `trend` `tenkan` `kijun` `side` |
 
 どれも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
 
@@ -122,7 +123,7 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 ```
 fxbot/
   data.py        CSV 読み込み / 書き出し / 合成データ
-  indicators.py  SMA, ATR など（足 i までしか見ない）
+  indicators.py  SMA, ATR, EMA, MACD, ストキャス, ADX, パラボリックSAR, 一目 など（足 i までしか見ない）
   strategy.py    戦略。方向と損切り幅を返すだけで、発注はしない
   risk.py        ロット計算、ドローダウン停止
   broker.py      Broker インターフェースと PaperBroker（仮想約定・スワップ計上）

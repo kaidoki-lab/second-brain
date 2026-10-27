@@ -12,7 +12,7 @@ from typing import Sequence
 
 from . import swap
 from .data import Bar
-from .indicators import atr, highest, lowest, rsi, sma, stdev
+from .indicators import adx, atr, ema, highest, ichimoku, lowest, macd, psar, rsi, sma, stdev, stoch
 
 
 @dataclass(frozen=True)
@@ -243,8 +243,102 @@ class Carry(Strategy):
         return Decision(side, *exits) if exits else None
 
 
+class Combo(Strategy):
+    """An entry signal gated by a market-state filter.
+
+    sig: 1 MACD crosses its signal line / 2 stochastics %K crosses %D below `lo` (buy)
+         or above `hi` (sell) / 3 Parabolic SAR flips / 4 Ichimoku tenkan crosses kijun /
+         5 EMA(fast) crosses EMA(slow)
+    flt: 0 none / 1 ADX >= `adx` and the DI lines agree (trending) / 2 ADX < `adx` (ranging) /
+         3 close on the signal's side of SMA(`trend`) / 4 close outside the Ichimoku cloud on that side
+    Ichimoku uses `tenkan` / `kijun` with span B = 2 x kijun.
+    A signal the filter allows is entered (reversing any opposite position); one it
+    blocks closes the position. Between signals the position is kept.
+    """
+
+    name = "combo"
+    summary = ("入る合図 sig（1 MACD / 2 ストキャス / 3 パラボリック / 4 一目の転換線×基準線 / 5 EMA交差）を、"
+               "地合い flt（0 なし / 1 ADXで強いトレンド / 2 ADXでレンジ / 3 SMA(trend)の向き / 4 雲の外）で絞る")
+    params = {"sig": 1, "flt": 0, "fast": 12, "slow": 26, "signal": 9, "k": 14, "lo": 20, "hi": 80,
+              "adx_n": 14, "adx": 25, "trend": 200, "tenkan": 9, "kijun": 26, "side": 0, **_EXIT_PARAMS}
+
+    def _ichimoku(self, bars: Sequence[Bar], i: int):
+        kijun = int(self.p["kijun"])
+        return ichimoku(bars, i, int(self.p["tenkan"]), kijun, 2 * kijun)
+
+    def _signal(self, bars: Sequence[Bar], i: int) -> int | None:
+        """+1 / -1 on a fresh signal at bar i, 0 when none, None while indicators warm up."""
+        sig, p = int(self.p["sig"]), self.p
+        if sig in (1, 4, 5):
+            if sig == 1:
+                now, prev = macd(bars, i, int(p["fast"]), int(p["slow"]), int(p["signal"])), \
+                    macd(bars, i - 1, int(p["fast"]), int(p["slow"]), int(p["signal"]))
+            elif sig == 4:
+                now, prev = self._ichimoku(bars, i), self._ichimoku(bars, i - 1)
+            else:
+                f0, s0 = ema(bars, i, int(p["fast"])), ema(bars, i, int(p["slow"]))
+                f1, s1 = ema(bars, i - 1, int(p["fast"])), ema(bars, i - 1, int(p["slow"]))
+                now = (f0, s0) if f0 is not None and s0 is not None else None
+                prev = (f1, s1) if f1 is not None and s1 is not None else None
+            if now is None or prev is None:
+                return None
+            a0, b0, a1, b1 = now[0], now[1], prev[0], prev[1]
+            return 1 if a1 <= b1 and a0 > b0 else -1 if a1 >= b1 and a0 < b0 else 0
+        if sig == 2:
+            now, prev = stoch(bars, i, int(p["k"])), stoch(bars, i - 1, int(p["k"]))
+            if now is None or prev is None:
+                return None
+            if prev[0] <= prev[1] and now[0] > now[1] and now[1] < p["lo"]:
+                return 1
+            if prev[0] >= prev[1] and now[0] < now[1] and now[1] > p["hi"]:
+                return -1
+            return 0
+        if sig == 3:
+            now, prev = psar(bars, i), psar(bars, i - 1)
+            if now is None or prev is None:
+                return None
+            return now[1] if now[1] != prev[1] else 0
+        raise ValueError(f"combo: sig は 1〜5 です ({sig})")
+
+    def _allows(self, bars: Sequence[Bar], i: int, direction: int) -> bool | None:
+        flt, p = int(self.p["flt"]), self.p
+        if flt == 0:
+            return True
+        if flt in (1, 2):
+            a = adx(bars, i, int(p["adx_n"]))
+            if a is None:
+                return None
+            if flt == 2:
+                return a[0] < p["adx"]
+            return a[0] >= p["adx"] and (a[1] - a[2]) * direction > 0
+        if flt == 3:
+            mean = sma(bars, i, int(p["trend"]))
+            return None if mean is None else (bars[i].close - mean) * direction > 0
+        if flt == 4:
+            ich = self._ichimoku(bars, i)
+            if ich is None:
+                return None
+            return bars[i].close > ich[2] if direction > 0 else bars[i].close < ich[3]
+        raise ValueError(f"combo: flt は 0〜4 です ({flt})")
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        if i < 1:
+            return None
+        direction = self._signal(bars, i)
+        if not direction:
+            return None
+        side = int(self.p["side"])
+        ok = self._allows(bars, i, direction)
+        exits = self._exits(bars, i)
+        if ok is None or exits is None:
+            return None
+        if not ok or (side and direction != side):
+            return Decision(0)
+        return Decision(direction, *exits)
+
+
 STRATEGIES: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (MACross, Breakout, BandRevert, RSIRevert, Pullback, SessionBreakout, Carry)
+    cls.name: cls for cls in (MACross, Breakout, BandRevert, RSIRevert, Pullback, SessionBreakout, Carry, Combo)
 }
 
 
