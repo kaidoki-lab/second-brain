@@ -30,6 +30,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 | `mt5_demo.bat` | `python run.py live --symbol USDJPY --timeframe H1 --strategy ma_cross` | デモ口座で自動売買 |
 | `mt5_session_bo.bat` | `python run.py live ... --strategy session_bo --risk 0.5 --params ...,side=1,no_fri=1` | USDJPY の session_bo（買いのみ・金曜休み）をデモで前進テスト |
 | `mt5_carry.bat` | `python run.py live --symbol USDJPY- --timeframe D1 --strategy carry --risk 3 --params regime=50 --magic 210002 --terminal ...` | 外為ファイネストのデモで carry を USDJPY- / AUDJPY- / GBPJPY- の3ウィンドウで前進テスト（ログは `data/carry_<銘柄>/`） |
+| `mt5_ichimoku.bat` | `python run.py live --symbol USDJPY- --timeframe H1 --strategy combo --risk 0.25 --params sig=4,flt=0,tenkan=9,kijun=26,sl_atr=2,tp_atr=0 --magic 210003 ...` | 外為ファイネストのデモで 一目（転換線×基準線）を USDJPY- 1時間足で前進テスト（ログと約定は `data/ichimoku/`） |
 | `autostart_on.bat` / `autostart_off.bat` | — | サインイン時に `mt5_session_bo.bat` を自動起動する／やめる（スタートアップのショートカット） |
 
 `live` の動き:
