@@ -159,6 +159,11 @@ class RunLiveTest(unittest.TestCase):
         # 1% of 1,000,000 / 0.5 stop = 20,000 units = 0.2 lot
         self.assertEqual(fake.requests[-1]["volume"], 0.2)
 
+    def test_custom_magic_tags_orders(self):
+        fake = FakeMT5()
+        link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=lambda m: None, magic=777)
+        self.assertEqual(fake.requests[-1]["magic"], 777)
+
     def test_stay_awake_is_requested_and_released(self):
         calls = []
         original = link.keep_awake

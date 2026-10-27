@@ -1,8 +1,10 @@
 import unittest
+from datetime import datetime
 
 from _ctx import bars
 
 from fxbot.broker import PaperBroker
+from fxbot.data import Bar
 
 
 class PaperBrokerTest(unittest.TestCase):
@@ -86,6 +88,32 @@ class PaperBrokerTest(unittest.TestCase):
         b.on_bar(series[2])
         self.assertEqual(b.trades[0].reason, "take")
         self.assertAlmostEqual(b.trades[0].exit_price, 102.1)
+
+    def test_swap_accrues_per_calendar_day_held(self):
+        # +3.65%/yr long, -5%/yr short; daily bars Thu, Fri, Mon (weekend = 3 days)
+        b = PaperBroker(0, spread=0, swap=lambda t: (3.65, -5.0))
+        days = [datetime(2024, 1, 4), datetime(2024, 1, 5), datetime(2024, 1, 8), datetime(2024, 1, 9)]
+        series = [Bar(d, 100, 100, 100, 100) for d in days]
+        b.on_bar(series[0])
+        b.open(1, 1000, stop=5, take=None)
+        b.on_bar(series[1])                       # filled Fri open: nothing held overnight yet
+        self.assertAlmostEqual(b.position().swap, 0)
+        b.on_bar(series[2])                       # Fri -> Mon: 3 days x 1000 x 100 x 3.65% / 365
+        self.assertAlmostEqual(b.position().swap, 30)
+        self.assertAlmostEqual(b.equity(), 30)
+        b.close()
+        b.on_bar(series[3])                       # one more night, then closed at Tue open
+        self.assertAlmostEqual(b.trades[0].swap, 40)
+        self.assertAlmostEqual(b.trades[0].pnl, 40)
+
+    def test_short_pays_negative_swap(self):
+        b = PaperBroker(0, spread=0, swap=lambda t: (3.65, -3.65))
+        series = [Bar(datetime(2024, 1, d), 100, 100, 100, 100) for d in (1, 2, 3)]
+        b.on_bar(series[0])
+        b.open(-1, 1000, stop=5, take=None)
+        b.on_bar(series[1])
+        b.on_bar(series[2])
+        self.assertAlmostEqual(b.position().swap, -10)
 
     def test_equity_marks_to_market(self):
         b = PaperBroker(1000, spread=0)

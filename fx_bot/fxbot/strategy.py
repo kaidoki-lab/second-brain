@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Sequence
 
+from . import swap
 from .data import Bar
 from .indicators import atr, highest, lowest, rsi, sma, stdev
 
@@ -25,6 +26,7 @@ class Strategy:
     name = "base"
     summary = ""
     params: dict[str, float] = {}
+    symbol = ""   # set by build(); only strategies that need the pair (carry) read it
 
     def __init__(self, **params: float) -> None:
         unknown = set(params) - set(self.params)
@@ -202,8 +204,47 @@ class SessionBreakout(Strategy):
         return Decision(direction, *exits)
 
 
+class Carry(Strategy):
+    """Hold the side the overnight swap pays, but only while price is on that side of its long SMA.
+
+    Meant for daily bars. The side comes from the policy-rate table (swap.py): the
+    yearly rate a side earns after the broker's `cut` must reach `edge`, else stay flat.
+    `side` 1 / -1 fixes the side instead (use the broker's actual swap sheet live).
+    Dropping out when the close crosses the `regime`-bar SMA is what keeps a carry
+    unwind (2008, 2024-08) from turning into a deep open loss; the `sl_atr` stop is a
+    wide backstop on the server. `regime` 0 holds regardless of price.
+    """
+
+    name = "carry"
+    summary = ("スワップが受け取れる側に持ち続け、終値が regime 本SMAより不利側に来たら降りる（日足向け）。"
+               "side=0 は金利表で自動（業者の取り分 cut、受け取り edge 未満なら持たない）、1/-1 で固定")
+    params = {"regime": 100, "edge": 0.5, "cut": 1.0, "side": 0, "atr": 20, "sl_atr": 5.0, "tp_atr": 0.0}
+
+    def decide(self, bars: Sequence[Bar], i: int) -> Decision | None:
+        side = int(self.p["side"])
+        if not side:
+            if not self.symbol:
+                raise ValueError("carry: side=1/-1 を指定するか、通貨ペア (--symbol) を渡してください")
+            if not swap.covered(bars[i].time.date()):
+                return None
+            d = swap.diff(self.symbol, bars[i].time.date())
+            cut, edge = self.p["cut"], self.p["edge"]
+            side = 1 if d - cut >= edge else -1 if -d - cut >= edge else 0
+            if not side:
+                return Decision(0)
+        n = int(self.p["regime"])
+        if n:
+            mean = sma(bars, i, n)
+            if mean is None:
+                return None
+            if (bars[i].close - mean) * side < 0:
+                return Decision(0)
+        exits = self._exits(bars, i)
+        return Decision(side, *exits) if exits else None
+
+
 STRATEGIES: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (MACross, Breakout, BandRevert, RSIRevert, Pullback, SessionBreakout)
+    cls.name: cls for cls in (MACross, Breakout, BandRevert, RSIRevert, Pullback, SessionBreakout, Carry)
 }
 
 
@@ -220,7 +261,9 @@ def parse_params(text: str | None) -> dict[str, float]:
     return out
 
 
-def build(name: str, params: dict[str, float] | None = None) -> Strategy:
+def build(name: str, params: dict[str, float] | None = None, symbol: str = "") -> Strategy:
     if name not in STRATEGIES:
         raise ValueError(f"未知の戦略 {name!r} (使えるもの: {', '.join(STRATEGIES)})")
-    return STRATEGIES[name](**(params or {}))
+    strat = STRATEGIES[name](**(params or {}))
+    strat.symbol = symbol
+    return strat

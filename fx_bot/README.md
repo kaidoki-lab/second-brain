@@ -29,6 +29,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 | `mt5_fetch.bat` | `python run.py fetch --symbol USDJPY --timeframe H1` | 過去データを `data/USDJPY_H1.csv` に保存 |
 | `mt5_demo.bat` | `python run.py live --symbol USDJPY --timeframe H1 --strategy ma_cross` | デモ口座で自動売買 |
 | `mt5_session_bo.bat` | `python run.py live ... --strategy session_bo --risk 0.5 --params ...,side=1,no_fri=1` | USDJPY の session_bo（買いのみ・金曜休み）をデモで前進テスト |
+| `mt5_carry.bat` | `python run.py live --symbol USDJPY- --timeframe D1 --strategy carry --risk 3 --params regime=50 --magic 210002 --terminal ...` | 外為ファイネストのデモで carry を USDJPY- / AUDJPY- / GBPJPY- の3ウィンドウで前進テスト（ログは `data/carry_<銘柄>/`） |
 | `autostart_on.bat` / `autostart_off.bat` | — | サインイン時に `mt5_session_bo.bat` を自動起動する／やめる（スタートアップのショートカット） |
 
 `live` の動き:
@@ -44,6 +45,9 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 - 常駐中は Windows のスリープを抑止します（電源設定は変えません。カバーを閉じる・電池切れでは止まります）
 - `--notify https://ntfy.sh/<自分だけのトピック名>` を付けると、売買・エラーをスマホに通知します（既定は送りません）
 - リアル口座だと起動を拒否します（`--allow-real` で解除できますが、デモで十分確かめてから）
+- 同じ口座で2つ目の戦略を動かすときは `--magic 210002` のように**目印を変えます**（同じ目印だと互いのポジションを自分のものと思い込みます）。
+  ただし最大ドローダウンの停止と数量計算は口座全体の有効証拠金で判断するので、相手の損益の影響は受けます。完全に分けるなら別の口座で
+- `carry` で起動すると、業者のスワップ（MT5 の表示値）をログに出します。受け取れる側と carry の方向が合っているか確認してください
 
 `pip install MetaTrader5` が失敗するときは、その Python のバージョンにまだ対応していない可能性があります。
 対応している Python（[PyPI のページ](https://pypi.org/project/MetaTrader5/) で確認）を入れてください。
@@ -76,7 +80,7 @@ python run.py backtest --csv data/EURUSD_H1.csv --symbol EURUSD --spread 0.4 --q
 | `sample` | 合成データ作成 |
 | `compare` | デモ口座の取引を、同じ期間のバックテストと1件ずつ照合（入り・出口の差 pips、片方だけの取引）。MT5 が必要。例: `python run.py compare --strategy session_bo --params ... --since 2026-10-27` |
 
-共通オプション: `--slippage`（成行・損切りの滑り pips, 既定 0）`--equity`（初期資金, 既定 100万）`--risk`（1回の損失許容 %, 既定 1）`--leverage`（既定 25）`--max-dd`（停止ライン %, 既定 20）
+共通オプション: `--swap`（政策金利表から推定したスワップを損益に入れる。`carry` では常に入る）`--swap-cut`（業者の取り分 年率%, 既定 1）`--slippage`（成行・損切りの滑り pips, 既定 0）`--equity`（初期資金, 既定 100万）`--risk`（1回の損失許容 %, 既定 1）`--leverage`（既定 25）`--max-dd`（停止ライン %, 既定 20）
 
 ```bash
 python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100,200 sl_atr=1.5,2,3
@@ -93,6 +97,8 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 | `pullback` | 終値が長期SMA(`trend`)より上なら RSI の押し目で買い、下なら戻りで売り。RSI が 50 を跨いだら手仕舞い | `trend` `n` `lo` `hi` |
 | `session_bo` | その日の `rs`〜`re` 時の高値/安値を抜けたら入り、`exit_h` 時に必ず手仕舞い（時刻は MT5 サーバー時刻。H1 以下向け）。`side=1` で買いのみ・`-1` で売りのみ、`no_fri=1` で金曜は休む。`shift` は時計のずらし（業者が1時間進んでいれば `-1`） | `rs` `re` `exit_h` `side` `no_fri` `shift` |
 
+| `carry` | スワップが受け取れる側に持ち続け、終値が `regime` 本SMAより不利側に来たら降りる（日足向け）。方向は金利表で自動（業者の取り分 `cut` を引いた受け取りが `edge` 未満なら持たない）。`side=1/-1` で固定。既定の損切りは ATR(20)×5 の遠い保険 | `regime` `edge` `cut` `side` |
+
 どれも共通で `atr`（ATR期間）`sl_atr`（損切り = ATR × 倍率）`tp_atr`（利確倍率, 0 で無し）。
 
 ## シミュレーションの約束事（甘く見積もらないため）
@@ -105,7 +111,11 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 6. 資金がピークから `--max-dd`% 減ったら全決済して**以後停止**
 7. `--slippage` を付けると、成行の新規・決済と損切りの約定がその pips だけ不利にずれる（利確は指値なのでずれない）
 
-スワップ・約定拒否はまだ入っていません。実際の成績はこれより悪くなる前提で見てください。
+8. `--swap`（と `carry`）では、日付をまたいで持ったポジションに、その日の金利差 − 業者の取り分 を暦日数ぶん加える（週末は3日分）。
+   金利差は `swap.py` の政策金利表（2008年以降・手入力の概算）から。2008年より前はスワップ0で、`carry`（自動方向）は持たない
+
+スワップは推定値で、約定拒否はまだ入っていません。実際の成績はこれより悪くなる前提で見てください。
+業者のスワップは金利差どおりとは限りません（MetaQuotes-Demo はドル円の買いでもマイナス）。`carry` を試すなら実際のスワップ表を確認してください。
 
 ## 構成
 
@@ -115,7 +125,8 @@ fxbot/
   indicators.py  SMA, ATR など（足 i までしか見ない）
   strategy.py    戦略。方向と損切り幅を返すだけで、発注はしない
   risk.py        ロット計算、ドローダウン停止
-  broker.py      Broker インターフェースと PaperBroker（仮想約定）
+  broker.py      Broker インターフェースと PaperBroker（仮想約定・スワップ計上）
+  swap.py        政策金利表とスワップの推定
   backtest.py    step(): 1本ごとの判断→発注。run(): 過去データを流す
   mt5.py         MT5 から過去データ取得 / MT5Broker / 自動売買ループ
   metrics.py     成績集計

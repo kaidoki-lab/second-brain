@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Sequence
 
-from .broker import Broker, PaperBroker, Trade
+from .broker import Broker, PaperBroker, SwapRates, Trade
 from .data import Bar
 from .risk import DrawdownGuard, RiskConfig, size_units
 from .strategy import Strategy
@@ -52,9 +52,10 @@ def run(
     initial_equity: float = 1_000_000,
     spread: float = 0.0,
     slippage: float = 0.0,
+    swap: SwapRates | None = None,
 ) -> Result:
     risk = risk or RiskConfig()
-    broker = PaperBroker(initial_equity, spread, risk.quote_to_account, slippage)
+    broker = PaperBroker(initial_equity, spread, risk.quote_to_account, slippage, swap)
     guard = DrawdownGuard(risk.max_drawdown_pct)
     result = Result(strategy.describe(), initial_equity, broker.trades)
 

@@ -279,15 +279,21 @@ def run_live(
     fills: str | Path | None = None,
     stay_awake: bool = False,
     relink: Callable[[], bool] | None = None,
+    magic: int = MAGIC,
 ) -> None:
     """Evaluate the strategy each time a new bar closes, until Ctrl+C or the drawdown halt."""
     if not is_demo(mt5) and not allow_real:
         raise MT5Error("リアル口座です。安全のため停止しました (どうしても動かす場合のみ --allow-real)")
-    broker = MT5Broker(mt5, symbol, log=log, fills=fills)
+    broker = MT5Broker(mt5, symbol, magic=magic, log=log, fills=fills)
     risk.lot_step = broker.unit_step
     guard = DrawdownGuard(risk.max_drawdown_pct)
     log(account_summary(mt5))
     log(f"{strategy.describe()}  {symbol} {timeframe}  開始 (Ctrl+C で停止。ポジションはそのまま残ります)")
+    if magic != MAGIC:
+        log(f"注文の目印 (マジックナンバー) {magic}")
+    if strategy.name == "carry":
+        log(f"業者のスワップ (MT5 の表示値): 買い {getattr(broker.info, 'swap_long', '?')} / "
+            f"売り {getattr(broker.info, 'swap_short', '?')}  ※ 受け取れる側と carry の方向が合っているか確認してください")
     if stay_awake:
         log("動作中は PC をスリープさせません" if keep_awake(True)
             else "[注意] スリープ抑止を設定できませんでした。PC がスリープすると止まります")

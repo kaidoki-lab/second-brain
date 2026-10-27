@@ -10,8 +10,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-from . import backtest, data, metrics, strategy
-from .mt5 import TIMEFRAMES, MT5Error
+from . import backtest, data, metrics, strategy, swap
+from .mt5 import MAGIC, TIMEFRAMES, MT5Error
 from .risk import RiskConfig, pip_size
 
 
@@ -21,6 +21,9 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--spread", type=float, default=0.3, help="スプレッド (pips)")
     p.add_argument("--slippage", type=float, default=0.0, help="成行・損切りの約定が不利にずれる幅 (pips)")
     p.add_argument("--equity", type=float, default=1_000_000, help="初期資金 (口座通貨)")
+    p.add_argument("--swap", action="store_true",
+                   help="政策金利表から推定したスワップを損益に入れる (carry では常に入れる)")
+    p.add_argument("--swap-cut", type=float, default=1.0, help="スワップから業者が取る分 (年率%%、買い売りとも)")
     _trading(p)
 
 
@@ -38,10 +41,15 @@ def _risk(args: argparse.Namespace) -> RiskConfig:
                       max_drawdown_pct=args.max_dd, quote_to_account=args.quote_rate)
 
 
+def _uses_swap(args: argparse.Namespace) -> bool:
+    return args.swap or args.strategy == "carry"
+
+
 def _run(args: argparse.Namespace, bars: list[data.Bar], params: dict[str, float]) -> backtest.Result:
-    strat = strategy.build(args.strategy, params)
+    strat = strategy.build(args.strategy, params, args.symbol)
+    rates = swap.estimator(args.symbol, args.swap_cut) if _uses_swap(args) else None
     return backtest.run(bars, strat, _risk(args), args.equity,
-                        args.spread * pip_size(args.symbol), args.slippage * pip_size(args.symbol))
+                        args.spread * pip_size(args.symbol), args.slippage * pip_size(args.symbol), rates)
 
 
 def _pad(text: str, width: int) -> str:
@@ -81,15 +89,19 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     if result.halted_at:
         print(f"  !! 最大ドローダウン {args.max_dd}% に達したため {result.halted_at} で停止しました")
     _print_summary(metrics.summarize(result))
+    if _uses_swap(args):
+        total = sum(t.swap for t in result.trades)
+        print(f"  {_pad('うちスワップ(推定)', 24)}{total:,.0f}  (業者の取り分 年{args.swap_cut}% を引いた値)")
     if args.trades:
         path = Path(args.trades)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["direction", "units", "entry_time", "entry_price", "exit_time", "exit_price", "pnl", "reason"])
+            w.writerow(["direction", "units", "entry_time", "entry_price", "exit_time", "exit_price", "pnl", "reason",
+                        "swap"])
             for t in result.trades:
                 w.writerow(["long" if t.direction > 0 else "short", t.units, t.entry_time, round(t.entry_price, 6),
-                            t.exit_time, round(t.exit_price, 6), round(t.pnl, 2), t.reason])
+                            t.exit_time, round(t.exit_price, 6), round(t.pnl, 2), t.reason, round(t.swap, 2)])
         print(f"  取引履歴: {path}")
     return 0
 
@@ -178,7 +190,7 @@ def cmd_live(args: argparse.Namespace) -> int:
 
     from . import mt5 as mt5link
 
-    strat = strategy.build(args.strategy, strategy.parse_params(args.params))
+    strat = strategy.build(args.strategy, strategy.parse_params(args.params), args.symbol)
     log = _live_logger(args.log_dir or None, args.notify)
     while True:
         try:
@@ -194,7 +206,8 @@ def cmd_live(args: argparse.Namespace) -> int:
                          history=args.history, poll=args.poll, allow_real=args.allow_real, once=args.once,
                          log=log,
                          fills=args.fills if args.fills is not None else f"data/fills_{args.symbol}.csv",
-                         stay_awake=not args.once, relink=lambda: mt5link.reconnect(mt5, args.terminal))
+                         stay_awake=not args.once, relink=lambda: mt5link.reconnect(mt5, args.terminal),
+                         magic=args.magic)
     except KeyboardInterrupt:
         print("停止しました。保有中のポジションは MT5 上にそのまま残っています (損切り注文は有効)。")
     finally:
@@ -207,11 +220,11 @@ def cmd_compare(args: argparse.Namespace) -> int:
     from . import mt5 as mt5link
 
     since = datetime.strptime(args.since, "%Y-%m-%d")
-    strat = strategy.build(args.strategy, strategy.parse_params(args.params))
+    strat = strategy.build(args.strategy, strategy.parse_params(args.params), args.symbol)
     mt5 = mt5link.connect(args.terminal)
     try:
         bars = mt5link.fetch_bars(mt5, args.symbol, args.timeframe, args.history)
-        live = mt5link.live_trades(mt5, args.symbol, since)
+        live = mt5link.live_trades(mt5, args.symbol, since, args.magic)
     finally:
         mt5.shutdown()
     pip = pip_size(args.symbol)
@@ -275,6 +288,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--timeframe", default="H1", choices=TIMEFRAMES)
         p.add_argument("--terminal", help="terminal64.exe のパス (自動で見つからない時だけ)")
 
+    def _magic(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--magic", type=int, default=MAGIC,
+                       help=f"注文の目印 (既定 {MAGIC})。同じ口座で別の戦略を動かす時は戦略ごとに変える")
+
     p = sub.add_parser("fetch", help="MT5 から過去データをCSVに保存")
     _mt5(p)
     p.add_argument("--bars", type=int, default=50_000)
@@ -283,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("live", help="MT5 デモ口座で自動売買")
     _mt5(p)
+    _magic(p)
     _trading(p)
     p.add_argument("--params", help="例: fast=20,slow=80,sl_atr=2")
     p.add_argument("--history", type=int, default=1000, help="判断に使う足の本数")
@@ -296,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("compare", help="デモ/実口座の取引を同じ期間のバックテストと1件ずつ照合")
     _mt5(p)
+    _magic(p)
     _trading(p)
     p.add_argument("--params", help="live と同じパラメータ")
     p.add_argument("--since", required=True, help="この日以降の取引を比べる (YYYY-MM-DD、サーバー時刻)")

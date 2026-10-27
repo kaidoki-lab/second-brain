@@ -1,12 +1,20 @@
 import unittest
+from datetime import date, datetime, timedelta
 
 from _ctx import bars, flat
 
-from fxbot import backtest, data, metrics
+from fxbot import backtest, data, metrics, swap
+from fxbot.data import Bar
 from fxbot.risk import RiskConfig
 from fxbot.indicators import rsi, stdev
 from fxbot.strategy import (BandRevert, Breakout, Decision, MACross, Pullback, RSIRevert, SessionBreakout,
                             Strategy, build, parse_params)
+
+
+def daily(closes, start):
+    """One bar per calendar day; each bar's range is +-0.2 around its close."""
+    t = datetime(start.year, start.month, start.day)
+    return [Bar(t + timedelta(days=k), c, c + 0.2, c - 0.2, c) for k, c in enumerate(closes)]
 
 
 class Script(Strategy):
@@ -144,6 +152,33 @@ class StrategyTest(unittest.TestCase):
         s = SessionBreakout(rs=0, re=8, exit_h=20, atr=5, shift=-1)
         self.assertEqual(s.decide(series, 8).direction, 0)      # 08:00 data = 07:00 shifted, still in the range
         self.assertEqual(s.decide(series, 9).direction, 1)
+
+    def test_carry_holds_the_paying_side_while_the_trend_agrees(self):
+        up = daily([100 + k * 0.1 for k in range(30)], date(2024, 3, 1))     # USD pays vs JPY in 2024
+        s = build("carry", {"regime": 10, "atr": 5}, "USDJPY")
+        d = s.decide(up, 29)
+        self.assertEqual(d.direction, 1)
+        self.assertGreater(d.stop, 0)
+        down = daily([100 - k * 0.1 for k in range(30)], date(2024, 3, 1))
+        self.assertEqual(s.decide(down, 29).direction, 0)                   # below the SMA: step aside
+
+    def test_carry_stays_flat_when_the_swap_is_too_small(self):
+        # EUR -0.5% vs JPY -0.1% in 2020: neither side clears cut 1% + edge 0.5%
+        series = daily([100 + k * 0.1 for k in range(30)], date(2020, 3, 1))
+        self.assertEqual(build("carry", {"regime": 10, "atr": 5}, "EURJPY").decide(series, 29).direction, 0)
+
+    def test_carry_fixed_side_needs_no_symbol(self):
+        down = daily([100 - k * 0.1 for k in range(30)], date(2024, 3, 1))
+        self.assertEqual(build("carry", {"regime": 10, "atr": 5, "side": -1}).decide(down, 29).direction, -1)
+        with self.assertRaises(ValueError):
+            build("carry", {"regime": 10, "atr": 5}).decide(down, 29)
+
+    def test_carry_backtest_books_swap(self):
+        series = daily([100 + k * 0.05 for k in range(200)], date(2024, 1, 1))
+        r = backtest.run(series, build("carry", {"regime": 20}, "AUDJPY"), spread=0.01,
+                         swap=swap.estimator("AUDJPY"))
+        self.assertGreater(sum(t.swap for t in r.trades), 0)
+        self.assertAlmostEqual(r.final_equity, 1_000_000 + sum(t.pnl for t in r.trades), places=4)
 
     def test_new_strategies_run_end_to_end(self):
         series = data.synthetic(n=1500, seed=3)

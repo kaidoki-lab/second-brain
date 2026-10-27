@@ -9,8 +9,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 from .data import Bar
+
+# time -> (long %, short %) per year; see swap.estimator
+SwapRates = Callable[[datetime], "tuple[float, float]"]
 
 
 @dataclass
@@ -21,6 +25,7 @@ class Position:
     entry_price: float
     stop_price: float | None
     take_price: float | None
+    swap: float = 0.0  # accrued so far, account currency
 
 
 @dataclass(frozen=True)
@@ -31,8 +36,9 @@ class Trade:
     entry_price: float
     exit_time: datetime
     exit_price: float
-    pnl: float
+    pnl: float         # price P&L + swap
     reason: str        # signal / stop / take / halt / end
+    swap: float = 0.0  # the swap part of pnl
 
 
 class Broker(ABC):
@@ -58,14 +64,18 @@ class PaperBroker(Broker):
     (pessimistic). Gaps through a stop fill at the open, not at the stop.
     `slippage` (price units) worsens every market fill: entries, signal/halt
     exits and stop exits. Take-profit fills are limit orders and get none.
+    With `swap`, a position held across a change of date (the broker's rollover)
+    earns or pays that day's yearly rate on its value, once per calendar day passed
+    (so a weekend counts three days, much like the usual Wednesday triple).
     """
 
     def __init__(self, initial_equity: float, spread: float, quote_to_account: float = 1.0,
-                 slippage: float = 0.0) -> None:
+                 slippage: float = 0.0, swap: SwapRates | None = None) -> None:
         self.cash = initial_equity
         self.spread = spread
         self.slippage = slippage
         self.q2a = quote_to_account
+        self.swap = swap
         self.trades: list[Trade] = []
         self._pos: Position | None = None
         self._pending: list[tuple] = []
@@ -75,7 +85,7 @@ class PaperBroker(Broker):
     def equity(self) -> float:
         if self._pos is None or self._last is None:
             return self.cash
-        return self.cash + self._pnl(self._pos, self._exit_price(self._pos.direction, self._last.close))
+        return self.cash + self._pnl(self._pos, self._exit_price(self._pos.direction, self._last.close)) + self._pos.swap
 
     def position(self) -> Position | None:
         return self._pos
@@ -88,7 +98,13 @@ class PaperBroker(Broker):
 
     # -- simulation ---------------------------------------------------------
     def on_bar(self, bar: Bar) -> None:
-        """Advance one bar: fill pending orders at the open, then run stops/targets."""
+        """Advance one bar: book overnight swap, fill pending orders at the open, then run stops/targets."""
+        if self.swap and self._pos is not None and self._last is not None:
+            days = (bar.time.date() - self._last.time.date()).days
+            if days > 0:
+                long_pct, short_pct = self.swap(self._last.time)
+                pct = long_pct if self._pos.direction > 0 else short_pct
+                self._pos.swap += self._pos.units * self._last.close * self.q2a * pct / 100 / 365 * days
         pending, self._pending = self._pending, []
         for order in pending:
             if order[0] == "close":
@@ -130,9 +146,10 @@ class PaperBroker(Broker):
     def _exit(self, when: datetime, price: float, reason: str) -> None:
         pos = self._pos
         assert pos is not None
-        pnl = self._pnl(pos, price)
+        pnl = self._pnl(pos, price) + pos.swap
         self.cash += pnl
-        self.trades.append(Trade(pos.direction, pos.units, pos.entry_time, pos.entry_price, when, price, pnl, reason))
+        self.trades.append(Trade(pos.direction, pos.units, pos.entry_time, pos.entry_price, when, price, pnl, reason,
+                                 pos.swap))
         self._pos = None
 
     def _check_exits(self, bar: Bar) -> None:
