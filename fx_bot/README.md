@@ -31,6 +31,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 | `mt5_session_bo.bat` | `python run.py live ... --strategy session_bo --risk 0.5 --params ...,side=1,no_fri=1` | USDJPY の session_bo（買いのみ・金曜休み）をデモで前進テスト |
 | `mt5_carry.bat` | `python run.py live --symbol USDJPY- --timeframe D1 --strategy carry --risk 3 --params regime=50 --magic 210002 --terminal ...` | 外為ファイネストのデモで carry を USDJPY- / AUDJPY- / GBPJPY- の3ウィンドウで前進テスト（ログは `data/carry_<銘柄>/`） |
 | `mt5_ichimoku.bat` | `python run.py live --symbol USDJPY- --timeframe H1 --strategy combo --risk 0.25 --params sig=4,flt=0,tenkan=9,kijun=26,sl_atr=2,tp_atr=0 --magic 210003 ...` | 外為ファイネストのデモで 一目（転換線×基準線）を USDJPY- 1時間足で前進テスト（ログと約定は `data/ichimoku/`） |
+| `mt5_watch.bat` | `python run.py watch` | `data/` 以下の状態ファイルを見張り、止まった bot を知らせる（ログは `data/watch/`） |
 | `autostart_on.bat` / `autostart_off.bat` | — | サインイン時に `mt5_session_bo.bat` を自動起動する／やめる（スタートアップのショートカット） |
 
 `live` の動き:
@@ -42,6 +43,7 @@ MT5 が入っている PC で、**MT5 を起動してデモ口座にログイン
 - Ctrl+C で停止（ポジションは残る）。`--once` で1回だけ判断して終了（動作確認用）
 - 約定は `data/fills_<銘柄>.csv` に「頼んだ価格・約定価格・滑り(pips)・スプレッド」を1行ずつ残します（`--fills ""` で無効）。MT5 側で約定した損切り・利確も、損切り価格との差を記録します
 - 動作ログは画面と `data/live_YYYYMMDD.log` の両方に出ます（`--log-dir` で変更）
+- 注文が断られたとき（日足の切り替わり直後の「Market closed」、気配が止まった「No prices」など）は、その足のうちに5秒おきで最大15分まで出し直します。それでも通らなければ次の足で判断し直します
 - MT5 との通信が切れても終了せず、待ち時間を延ばしながら取り直し、3回続けて失敗したら再接続します。起動時に MT5 につながらないときも1分おきに待ちます
 - 常駐中は Windows のスリープを抑止します（電源設定は変えません。カバーを閉じる・電池切れでは止まります）
 - `--notify https://ntfy.sh/<自分だけのトピック名>` を付けると、売買・エラーをスマホに通知します（既定は送りません）

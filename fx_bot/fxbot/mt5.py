@@ -457,6 +457,7 @@ def run_live(
 
 RECONNECT_AFTER = 3          # consecutive failed polls before re-initializing the terminal link
 MAX_BACKOFF = 60.0           # seconds between retries while MT5 is unreachable
+ORDER_RETRY_FOR = 900.0      # a refused order (market closed at the daily rollover, no prices) is retried this long
 
 
 def reconnect(mt5: Any, terminal: str | None = None) -> bool:
@@ -476,6 +477,8 @@ def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskC
     retried with backoff instead of ending the run; after a few in a row the link is re-initialized."""
     last_seen: datetime | None = None
     failures = 0
+    retries = 0                  # refused orders on the current bar
+    max_retries = max(1, int(ORDER_RETRY_FOR / poll)) if poll > 0 else 1
     while True:
         try:
             broker.check_server_exits()
@@ -494,8 +497,18 @@ def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskC
                 if not paused:
                     try:
                         step(broker, strategy, bars, len(bars) - 1, risk)
+                        if retries:
+                            log(f"[再試行] {retries + 1} 回目で通りました")
                     except MT5Error as exc:
-                        log(f"[注文エラー] {exc}")
+                        retries += 1
+                        if retries < max_retries and not once:
+                            if retries == 1:
+                                log(f"[注文エラー] {exc}  ({ORDER_RETRY_FOR / 60:.0f} 分まで再試行します)")
+                            alive()
+                            sleep(poll)
+                            continue
+                        log(f"[注文エラー] {exc}" + (f"  ({retries} 回試してあきらめました。次の足で判断し直します)" if retries > 1 else ""))
+                retries = 0
                 last_seen = bars[-1].time
                 after = broker.position()
                 state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,}通貨"

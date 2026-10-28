@@ -206,6 +206,44 @@ class RunLiveTest(unittest.TestCase):
         link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), once=True, log=logs.append)
         self.assertTrue(any("注文エラー" in m for m in logs))
 
+    def test_refused_order_is_retried_on_the_same_bar(self):
+        fake = FakeMT5()
+        fake.reject = True
+        logs, polls = [], []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) == 2:          # the market reopens after the rollover
+                fake.reject = False
+            if len(polls) == 4:
+                raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), log=logs.append, sleep=sleep)
+        self.assertEqual(len(fake.positions), 1)
+        self.assertEqual(sum("注文エラー" in m for m in logs), 1)
+        self.assertTrue(any("3 回目で通りました" in m for m in logs))
+
+    def test_refused_order_gives_up_after_the_retry_window(self):
+        fake = FakeMT5()
+        fake.reject = True
+        logs, polls = [], []
+        original = link.ORDER_RETRY_FOR
+        link.ORDER_RETRY_FOR = 15.0      # 3 tries at poll=5
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) == 5:
+                raise KeyboardInterrupt
+
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), log=logs.append, sleep=sleep)
+        finally:
+            link.ORDER_RETRY_FOR = original
+        self.assertEqual(len(fake.requests), 3)   # no more tries until the next bar
+        self.assertTrue(any("あきらめました" in m for m in logs))
+
     def test_drawdown_halt_closes(self):
         fake = FakeMT5()
         strat = Fixed(1)
