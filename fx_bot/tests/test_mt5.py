@@ -282,6 +282,59 @@ class RunLiveTest(unittest.TestCase):
         self.assertTrue(any("復旧" in m for m in logs))
         self.assertEqual(len(fake.requests), 1)               # traded once it came back
 
+    def test_relink_waits_while_an_mt5_update_needs_the_admin_prompt(self):
+        fake = FakeMT5()
+        fake.initialize = lambda **kw: self.fail("must not start the terminal while the updater waits")
+        fake.shutdown = lambda: None
+        with self.assertRaisesRegex(link.MT5Error, "許可待ち"):
+            link.reconnect(fake, "terminal64.exe", waiting=lambda: True)
+        fake.initialize = lambda **kw: True
+        self.assertTrue(link.reconnect(fake, "terminal64.exe", waiting=lambda: False))
+
+    def test_refused_relink_is_logged_and_the_loop_goes_on(self):
+        fake = FakeMT5()
+        fake.copy_rates_from_pos = lambda *a: None
+        fake.last_error = lambda: (-10003, "gone")
+        waits, logs = [], []
+
+        def sleep(s):
+            waits.append(s)
+            if len(waits) == 4:
+                raise KeyboardInterrupt
+
+        def relink():
+            raise link.MT5Error("MT5 の更新が管理者の許可待ちです")
+
+        with self.assertRaises(KeyboardInterrupt):
+            link.run_live(fake, "USDJPY", "H1", Fixed(1), RiskConfig(), log=logs.append, sleep=sleep, relink=relink)
+        self.assertTrue(any("再接続できません: MT5 の更新が管理者の許可待ち" in m for m in logs))
+        self.assertEqual(len(waits), 4)                       # kept polling after the refused relink
+
+    def test_state_write_retries_while_the_file_is_being_read(self):
+        fake = FakeMT5()
+        b = link.MT5Broker(fake, "USDJPY", log=lambda m: None)
+        real, calls = link.os.replace, []
+
+        def busy(src, dst):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError(5, "アクセスが拒否されました")
+            real(src, dst)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            link.os.replace = busy
+            try:
+                link.write_state(path, b, "H1", Fixed(1), link.LossLimit())
+                self.assertEqual(len(calls), 3)
+                self.assertTrue(path.exists())
+                calls.clear()
+                link.os.replace = lambda s, d: (calls.append(1), (_ for _ in ()).throw(PermissionError(5, "x")))
+                link.write_state(path, b, "H1", Fixed(1), link.LossLimit())   # gives up quietly
+                self.assertEqual(len(calls), link.STATE_REPLACE_TRIES)
+            finally:
+                link.os.replace = real
+
     def test_server_side_stop_is_logged_and_recorded(self):
         fake = FakeMT5()
         fake.DEAL_ENTRY_OUT, fake.DEAL_REASON_SL = 1, 4

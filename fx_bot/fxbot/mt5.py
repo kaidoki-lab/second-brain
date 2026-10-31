@@ -358,7 +358,49 @@ def write_state(path: Path, broker: MT5Broker, timeframe: str, strategy: Strateg
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(STATE_REPLACE_TRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:      # Windows: `watch` is reading the file right now
+            if attempt == STATE_REPLACE_TRIES - 1:
+                return               # skip this heartbeat; the next poll writes it again
+            time.sleep(0.2)
+
+
+STATE_REPLACE_TRIES = 5
+
+
+def updater_waiting() -> bool:
+    """True while an MT5 LiveUpdate (`...\\liveupdate\\terminal64.exe`) is running.
+
+    The updater needs the Windows admin prompt; starting the terminal again meanwhile
+    only stacks another updater and another prompt (seen 2026-10-30: 47 of them)."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        psapi, kernel = ctypes.WinDLL("psapi"), ctypes.WinDLL("kernel32")
+        pids = (wintypes.DWORD * 4096)()
+        got = wintypes.DWORD()
+        if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(got)):
+            return False
+        buf = ctypes.create_unicode_buffer(1024)
+        for pid in pids[:got.value // ctypes.sizeof(wintypes.DWORD)]:
+            h = kernel.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                continue
+            try:
+                size = wintypes.DWORD(len(buf))
+                if kernel.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)) and \
+                        buf.value.lower().endswith("\\liveupdate\\terminal64.exe"):
+                    return True
+            finally:
+                kernel.CloseHandle(h)
+    except Exception:  # noqa: BLE001 - can't tell: behave as before and try to relink
+        return False
+    return False
 
 
 def reconcile(broker: MT5Broker, state: Path | None, limits: LossLimit, log: Callable[[str], None]) -> None:
@@ -460,7 +502,9 @@ MAX_BACKOFF = 60.0           # seconds between retries while MT5 is unreachable
 ORDER_RETRY_FOR = 900.0      # a refused order (market closed at the daily rollover, no prices) is retried this long
 
 
-def reconnect(mt5: Any, terminal: str | None = None) -> bool:
+def reconnect(mt5: Any, terminal: str | None = None, waiting: Callable[[], bool] = updater_waiting) -> bool:
+    if waiting():
+        raise MT5Error("MT5 の更新が管理者の許可待ちです。PC で許可するまで MT5 は起動しません（こちらからは起動しません）")
     try:
         mt5.shutdown()
     except Exception:  # noqa: BLE001 - a dead link may fail to shut down; we re-initialize anyway
@@ -524,8 +568,12 @@ def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskC
             failures += 1
             log(f"[接続エラー] {type(exc).__name__}: {exc}  ({failures} 回目)")
             if failures % RECONNECT_AFTER == 0:
-                ok = relink()
-                log("MT5 に再接続しました" if ok else f"MT5 に再接続できません: {mt5.last_error()}")
+                try:
+                    ok = relink()
+                    log("MT5 に再接続しました" if ok else f"MT5 に再接続できません: {mt5.last_error()}")
+                except MT5Error as why:
+                    ok = False
+                    log(f"MT5 に再接続できません: {why}")
                 if ok and not allow_real and not is_demo(mt5):
                     raise MT5Error("再接続先がリアル口座です。安全のため停止しました") from exc
             if once:
