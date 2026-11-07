@@ -40,6 +40,13 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("[エラー]", out)
 
+    def test_btc_backtest_uses_crypto_defaults(self):
+        btc = str(self.dir / "btc.csv")
+        call("sample", "--out", btc, "--bars", "800", "--start", "15000000", "--vol", "0.006", "--digits", "0")
+        code, out = call("backtest", "--csv", btc, "--symbol", "BTCJPY", "--long-only", "--params", "fast=10,slow=40")
+        self.assertEqual(code, 0)
+        self.assertIn("最大レバレッジ 2倍 / 最小数量 0.001 / 買いのみ", out)
+
     def test_strategies(self):
         self.assertIn("breakout", call("strategies")[1])
 

@@ -46,6 +46,21 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual((short.entry_price, short.exit_price), (103, 104))
         self.assertEqual(r.final_equity, 100_000 + 200 - short.units)
 
+    def test_long_only_goes_flat_instead_of_short(self):
+        series = bars([(100, 100, 100, 100), (101, 101, 101, 101), (102, 102, 102, 102), (103, 103, 103, 103)])
+        strat = Script({0: Decision(1, stop=10), 1: Decision(-1, stop=10), 2: Decision(-1, stop=10)})
+        r = backtest.run(series, strat, RiskConfig(lot_step=1, long_only=True), initial_equity=100_000)
+        self.assertEqual([(t.direction, t.reason) for t in r.trades], [(1, "signal")])
+        self.assertEqual(r.trades[0].exit_price, 102)
+
+    def test_fractional_units(self):
+        series = data.synthetic(n=800, seed=2, start=15_000_000, vol=0.006, digits=0)
+        risk = RiskConfig(max_leverage=2, lot_step=0.001)
+        r = backtest.run(series, MACross(fast=10, slow=40), risk, spread=15_000)
+        self.assertTrue(r.trades)
+        self.assertTrue(all(0 < t.units < 1 for t in r.trades))
+        self.assertAlmostEqual(r.final_equity, 1_000_000 + sum(t.pnl for t in r.trades), places=4)
+
     def test_halt_on_drawdown(self):
         series = bars([(100, 100, 100, 100), (100, 100, 100, 100)] + [(90, 90, 90, 90)] * 3)
         strat = Script({0: Decision(1, stop=20)})

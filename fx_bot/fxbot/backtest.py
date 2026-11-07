@@ -34,15 +34,16 @@ def step(broker: Broker, strategy: Strategy, bars: Sequence[Bar], i: int, risk: 
     decision = strategy.decide(bars, i)
     if decision is None:
         return
+    direction = max(decision.direction, 0) if risk.long_only else decision.direction
     pos = broker.position()
     held = pos.direction if pos else 0
-    if decision.direction == held:
+    if direction == held:
         return
     if pos is not None:
         broker.close("signal")
-    if decision.direction != 0 and decision.stop:
+    if direction != 0 and decision.stop:
         units = size_units(broker.equity(), bars[i].close, decision.stop, risk)
-        broker.open(decision.direction, units, decision.stop, decision.take)
+        broker.open(direction, units, decision.stop, decision.take)
 
 
 def run(

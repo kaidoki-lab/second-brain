@@ -2,7 +2,7 @@ import unittest
 
 import _ctx  # noqa: F401
 
-from fxbot.risk import DrawdownGuard, RiskConfig, pip_size, size_units
+from fxbot.risk import DrawdownGuard, RiskConfig, defaults_for, is_crypto, pip_size, size_units
 
 
 class RiskTest(unittest.TestCase):
@@ -22,6 +22,23 @@ class RiskTest(unittest.TestCase):
         # EURUSD on a JPY account: stop 0.0050 USD * 150 JPY/USD = 0.75 JPY per unit
         cfg = RiskConfig(quote_to_account=150)
         self.assertEqual(size_units(1_000_000, 1.08, 0.005, cfg), 13_000)
+
+    def test_crypto_defaults(self):
+        self.assertTrue(is_crypto("BTCJPY"))
+        self.assertTrue(is_crypto("btc_jpy"))
+        self.assertFalse(is_crypto("USDJPY"))
+        self.assertEqual(pip_size("BTCJPY"), 1.0)
+        self.assertEqual(defaults_for("BTCUSD")["max_leverage"], 2)
+
+    def test_fractional_btc_size(self):
+        # 1% of 1,000,000 JPY = 10,000; stop 300,000 JPY per BTC -> 0.0333 -> 0.033 BTC
+        cfg = RiskConfig(**defaults_for("BTCJPY"))
+        self.assertEqual(size_units(1_000_000, 15_000_000, 300_000, cfg), 0.033)
+
+    def test_crypto_leverage_cap(self):
+        # tight stop wants a lot; 2x of 1,000,000 at 15,000,000 = 0.1333 -> 0.133 BTC
+        cfg = RiskConfig(**defaults_for("BTCJPY"))
+        self.assertEqual(size_units(1_000_000, 15_000_000, 1_000, cfg), 0.133)
 
     def test_too_small_is_zero(self):
         self.assertEqual(size_units(1000, 150, 5, RiskConfig()), 0)

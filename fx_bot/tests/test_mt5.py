@@ -35,6 +35,9 @@ class FakeMT5:
                   currency="JPY", login=1, server="Demo")
 
     def symbol_info(self, symbol):
+        if symbol == "BTCJPY":
+            return NS(visible=True, digits=0, volume_step=0.01, volume_min=0.01,
+                      trade_contract_size=1, filling_mode=1)
         if symbol != "USDJPY":
             return None
         return NS(visible=True, digits=3, volume_step=0.01, volume_min=0.01,
@@ -91,6 +94,17 @@ class MT5BrokerTest(unittest.TestCase):
         self.assertEqual(b.to_lots(20_000), 0.2)
         self.assertEqual(b.to_lots(20_999), 0.2)
         self.assertEqual(b.to_lots(500), 0.0)
+
+    def test_btc_fractional_lots(self):
+        fake = FakeMT5(closes=[15_000_000.0] * 30)
+        b = link.MT5Broker(fake, "BTCJPY", log=lambda m: None)
+        self.assertEqual(b.unit_step, 0.01)
+        self.assertEqual(b.to_lots(0.033), 0.03)
+        self.assertEqual(b.to_lots(0.005), 0.0)
+        b.open(1, 0.03, stop=300_000, take=None)
+        req = fake.requests[-1]
+        self.assertEqual((req["volume"], req["sl"], req["type_filling"]), (0.03, 14_700_000, fake.ORDER_FILLING_FOK))
+        self.assertEqual(b.position().units, 0.03)
 
     def test_open_sets_absolute_sl_and_close_uses_ticket(self):
         fake = FakeMT5()

@@ -20,7 +20,7 @@ SwapRates = Callable[[datetime], "tuple[float, float]"]
 @dataclass
 class Position:
     direction: int
-    units: int
+    units: float
     entry_time: datetime
     entry_price: float
     stop_price: float | None
@@ -31,7 +31,7 @@ class Position:
 @dataclass(frozen=True)
 class Trade:
     direction: int
-    units: int
+    units: float
     entry_time: datetime
     entry_price: float
     exit_time: datetime
@@ -49,7 +49,7 @@ class Broker(ABC):
     def position(self) -> Position | None: ...
 
     @abstractmethod
-    def open(self, direction: int, units: int, stop: float | None, take: float | None) -> None:
+    def open(self, direction: int, units: float, stop: float | None, take: float | None) -> None:
         """Market order. `stop` / `take` are distances from the fill price."""
 
     @abstractmethod
@@ -90,7 +90,7 @@ class PaperBroker(Broker):
     def position(self) -> Position | None:
         return self._pos
 
-    def open(self, direction: int, units: int, stop: float | None, take: float | None) -> None:
+    def open(self, direction: int, units: float, stop: float | None, take: float | None) -> None:
         self._pending.append(("open", direction, units, stop, take))
 
     def close(self, reason: str = "signal") -> None:

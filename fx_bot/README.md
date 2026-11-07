@@ -71,6 +71,32 @@ Ctrl+C や停止ラインで止めたものは「停止済み」として扱い�
 対応している Python（[PyPI のページ](https://pypi.org/project/MetaTrader5/) で確認）を入れてください。
 MT5 が自動で見つからないときは `--terminal "C:\Program Files\...\terminal64.exe"` で指定します。
 
+## ビットコイン（暗号資産）
+
+`--symbol` が `BTC`（ほか `ETH` `XRP` など）で始まると、暗号資産用の既定値に切り替わります。
+
+| | FX | 暗号資産 |
+| --- | --- | --- |
+| 最大レバレッジ | 25倍 | **2倍**（国内の暗号資産証拠金取引の上限） |
+| 最小数量 | 1,000通貨 | **0.001 BTC**（小数で計算） |
+| `--spread` の単位 | pips | **価格そのもの**（例: `--spread 15000` = 1.5万円） |
+| スプレッド既定値 | 0.3 pips | 価格の 0.1% |
+
+```bash
+# 合成データで配線確認（BTC円らしい値動き）
+python run.py sample --out data/sample_btcjpy_h1.csv --start 15000000 --vol 0.006 --digits 0
+python run.py backtest --csv data/sample_btcjpy_h1.csv --symbol BTCJPY
+
+# 現物（売りから入れない）を想定するなら --long-only。売りサインでは手仕舞いだけする
+python run.py backtest --csv data/BTCJPY_H1.csv --symbol BTCJPY --long-only
+```
+
+- MT5 の業者が BTC の CFD を扱っていれば、`mt5_fetch.bat` / `live` でそのまま使えます（銘柄名は業者により `BTCJPY` `BTCUSD` など）。
+  数量は MT5 の1ロットの量・最小ロットから自動で合わせます
+- BTC は24時間365日動き、FX より値動きが数倍大きい。同じ `--risk 1` でも数量はかなり小さくなります
+- **スプレッドは業者で大きく違います**（販売所は数%のこともある）。実際の値を `--spread` で入れてから判断してください
+- 取引所（bitFlyer・GMOコインなど）の API への直接接続はまだありません
+
 ## 本物のデータで試す
 
 合成データはランダムなので成績に意味はありません。実データは例えば:
@@ -95,10 +121,10 @@ python run.py backtest --csv data/EURUSD_H1.csv --symbol EURUSD --spread 0.4 --q
 | `strategies` | 戦略とパラメータの一覧 |
 | `backtest` | 1つの設定で検証。`--params fast=10,slow=40` `--trades out.csv` |
 | `optimize` | パラメータ総当たり。前半70%で選び、残り30%で**期間外検証**して過剰最適化を見抜く |
-| `sample` | 合成データ作成 |
+| `sample` | 合成データ作成。`--start` `--vol` `--digits` で値動きを変えられる |
 | `compare` | デモ口座の取引を、同じ期間のバックテストと1件ずつ照合（入り・出口の差 pips、片方だけの取引）。MT5 が必要。例: `python run.py compare --strategy session_bo --params ... --since 2026-10-27` |
 
-共通オプション: `--swap`（政策金利表から推定したスワップを損益に入れる。`carry` では常に入る）`--swap-cut`（業者の取り分 年率%, 既定 1）`--slippage`（成行・損切りの滑り pips, 既定 0）`--equity`（初期資金, 既定 100万）`--risk`（1回の損失許容 %, 既定 1）`--leverage`（既定 25）`--max-dd`（停止ライン %, 既定 20）
+共通オプション: `--swap`（政策金利表から推定したスワップを損益に入れる。`carry` では常に入る）`--swap-cut`（業者の取り分 年率%, 既定 1）`--slippage`（成行・損切りの滑り。FX は pips・暗号資産は価格, 既定 0）`--equity`（初期資金, 既定 100万）`--risk`（1回の損失許容 %, 既定 1）`--leverage`（既定 FX 25 / 暗号資産 2）`--lot-step`（最小数量）`--long-only`（買いのみ）`--max-dd`（停止ライン %, 既定 20）
 
 ```bash
 python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100,200 sl_atr=1.5,2,3
@@ -126,7 +152,7 @@ python run.py optimize --csv data/USDJPY_H1.csv --grid fast=10,20,40 slow=50,100
 2. 買いは ask（= bid + スプレッド）、売りは bid で約定
 3. 同じ足で損切りと利確の両方に届いたら**損切り**を採用
 4. 窓開けで損切り価格を飛び越えたら、損切り価格ではなく**始値**で約定
-5. ロットは「損切りに掛かったら資金の `--risk`% を失う」量。レバレッジ上限で頭打ち、1,000通貨単位で切り捨て
+5. ロットは「損切りに掛かったら資金の `--risk`% を失う」量。レバレッジ上限で頭打ち、最小数量（FX 1,000通貨 / BTC 0.001）単位で切り捨て
 6. 資金がピークから `--max-dd`% 減ったら全決済して**以後停止**
 7. `--slippage` を付けると、成行の新規・決済と損切りの約定がその pips だけ不利にずれる（利確は指値なのでずれない）
 

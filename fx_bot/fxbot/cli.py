@@ -12,14 +12,15 @@ from pathlib import Path
 
 from . import backtest, data, metrics, strategy, swap
 from .mt5 import MAGIC, TIMEFRAMES, MT5Error
-from .risk import RiskConfig, pip_size
+from .risk import RiskConfig, defaults_for, is_crypto, pip_size
 
 
 def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--csv", required=True, help="価格データ (time,open,high,low,close / MT5エクスポート形式)")
-    p.add_argument("--symbol", default="USDJPY", help="通貨ペア (pipサイズの判定に使用)")
-    p.add_argument("--spread", type=float, default=0.3, help="スプレッド (pips)")
-    p.add_argument("--slippage", type=float, default=0.0, help="成行・損切りの約定が不利にずれる幅 (pips)")
+    p.add_argument("--symbol", default="USDJPY", help="通貨ペア / 銘柄 (BTC で始まれば暗号資産の既定値を使う)")
+    p.add_argument("--spread", type=float,
+                   help="スプレッド。FXは pips (既定 0.3)、暗号資産は価格そのもの (既定: 価格の0.1%%)")
+    p.add_argument("--slippage", type=float, default=0.0, help="成行・損切りの約定が不利にずれる幅 (FX: pips / 暗号資産: 価格)")
     p.add_argument("--equity", type=float, default=1_000_000, help="初期資金 (口座通貨)")
     p.add_argument("--swap", action="store_true",
                    help="政策金利表から推定したスワップを損益に入れる (carry では常に入れる)")
@@ -30,15 +31,33 @@ def _common(p: argparse.ArgumentParser) -> None:
 def _trading(p: argparse.ArgumentParser) -> None:
     p.add_argument("--strategy", default="ma_cross", choices=sorted(strategy.STRATEGIES))
     p.add_argument("--risk", type=float, default=1.0, help="1取引で許容する損失 (資金の%%)")
-    p.add_argument("--leverage", type=float, default=25.0, help="最大レバレッジ")
+    p.add_argument("--leverage", type=float, help="最大レバレッジ (既定: FX 25 / 暗号資産 2)")
+    p.add_argument("--lot-step", type=float, help="最小数量 (既定: FX 1000通貨 / 暗号資産 0.001)")
+    p.add_argument("--long-only", action="store_true", help="買いだけ (現物の暗号資産など。売りサインでは手仕舞いだけ)")
     p.add_argument("--max-dd", type=float, default=20.0, help="この%%を超えて資金が減ったら停止")
     p.add_argument("--quote-rate", type=float, default=1.0,
                    help="決済通貨→口座通貨のレート (例: EURUSD を円口座なら USDJPY のレート)")
 
 
 def _risk(args: argparse.Namespace) -> RiskConfig:
-    return RiskConfig(risk_pct=args.risk, max_leverage=args.leverage,
-                      max_drawdown_pct=args.max_dd, quote_to_account=args.quote_rate)
+    auto = defaults_for(args.symbol)
+    return RiskConfig(
+        risk_pct=args.risk,
+        max_leverage=auto["max_leverage"] if args.leverage is None else args.leverage,
+        lot_step=auto["lot_step"] if args.lot_step is None else args.lot_step,
+        max_drawdown_pct=args.max_dd,
+        quote_to_account=args.quote_rate,
+        long_only=args.long_only,
+    )
+
+
+def _spread(args: argparse.Namespace, bars: list[data.Bar]) -> float:
+    """Spread in price units."""
+    if args.spread is not None:
+        return args.spread * pip_size(args.symbol)
+    if is_crypto(args.symbol):
+        return sorted(b.close for b in bars)[len(bars) // 2] * 0.001
+    return 0.3 * pip_size(args.symbol)
 
 
 def _uses_swap(args: argparse.Namespace) -> bool:
@@ -49,7 +68,7 @@ def _run(args: argparse.Namespace, bars: list[data.Bar], params: dict[str, float
     strat = strategy.build(args.strategy, params, args.symbol)
     rates = swap.estimator(args.symbol, args.swap_cut) if _uses_swap(args) else None
     return backtest.run(bars, strat, _risk(args), args.equity,
-                        args.spread * pip_size(args.symbol), args.slippage * pip_size(args.symbol), rates)
+                        _spread(args, bars), args.slippage * pip_size(args.symbol), rates)
 
 
 def _pad(text: str, width: int) -> str:
@@ -67,7 +86,7 @@ def _print_summary(stats: dict[str, float]) -> None:
 
 
 def cmd_sample(args: argparse.Namespace) -> int:
-    bars = data.synthetic(n=args.bars, seed=args.seed, start=args.start)
+    bars = data.synthetic(n=args.bars, seed=args.seed, start=args.start, vol=args.vol, digits=args.digits)
     data.write_csv(args.out, bars)
     print(f"合成データを {len(bars)} 本書き出しました: {args.out}")
     print("  ※ ランダムな値です。配線確認用で、ここでの成績に意味はありません。")
@@ -85,7 +104,10 @@ def cmd_strategies(args: argparse.Namespace) -> int:
 def cmd_backtest(args: argparse.Namespace) -> int:
     bars = data.load_csv(args.csv)
     result = _run(args, bars, strategy.parse_params(args.params))
+    risk = _risk(args)
     print(f"{result.strategy}  {args.symbol}  {bars[0].time} 〜 {bars[-1].time}  ({len(bars)}本)")
+    print(f"  スプレッド {_spread(args, bars):g} / 最大レバレッジ {risk.max_leverage:g}倍 / 最小数量 {risk.lot_step:g}"
+          + (" / 買いのみ" if risk.long_only else ""))
     if result.halted_at:
         print(f"  !! 最大ドローダウン {args.max_dd}% に達したため {result.halted_at} で停止しました")
     _print_summary(metrics.summarize(result))
@@ -291,7 +313,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="data/sample_usdjpy_h1.csv")
     p.add_argument("--bars", type=int, default=5000)
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--start", type=float, default=150.0)
+    p.add_argument("--start", type=float, default=150.0, help="開始価格 (BTC円なら 15000000 など)")
+    p.add_argument("--vol", type=float, default=0.0015, help="1本あたりの値動きの大きさ (BTC なら 0.006 前後)")
+    p.add_argument("--digits", type=int, default=3, help="価格の小数桁 (BTC円なら 0)")
     p.set_defaults(func=cmd_sample)
 
     p = sub.add_parser("strategies", help="使える戦略とパラメータの一覧")

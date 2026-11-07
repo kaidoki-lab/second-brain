@@ -19,7 +19,7 @@ from typing import Any, Callable
 from .backtest import step
 from .broker import Broker, Position, Trade
 from .data import Bar
-from .risk import DrawdownGuard, RiskConfig, pip_size
+from .risk import DrawdownGuard, RiskConfig, pip_size, tidy, unit_label
 from .strategy import Strategy
 
 TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
@@ -107,11 +107,11 @@ class MT5Broker(Broker):
         self._known: dict[int, Any] = {}     # our open positions as last seen, by ticket
 
     @property
-    def unit_step(self) -> int:
-        """Smallest tradable size in currency units (e.g. 0.01 lot x 100,000 = 1,000)."""
-        return max(int(round(self.info.volume_step * self.contract)), 1)
+    def unit_step(self) -> float:
+        """Smallest tradable size in units (FX: 0.01 lot x 100,000 = 1,000; BTC: 0.01 lot x 1 = 0.01)."""
+        return tidy(self.info.volume_step * self.contract)
 
-    def to_lots(self, units: int) -> float:
+    def to_lots(self, units: float) -> float:
         step = self.info.volume_step
         lots = int(units / self.contract / step + 1e-9) * step
         return round(lots, 8) if lots >= self.info.volume_min else 0.0
@@ -154,7 +154,7 @@ class MT5Broker(Broker):
         p = mine[0]
         return Position(
             direction=1 if p.type == self.mt5.POSITION_TYPE_BUY else -1,
-            units=int(round(sum(x.volume for x in mine) * self.contract)),
+            units=tidy(sum(x.volume for x in mine) * self.contract),
             entry_time=datetime.fromtimestamp(int(p.time), timezone.utc).replace(tzinfo=None),
             entry_price=p.price_open,
             stop_price=p.sl or None,
@@ -202,10 +202,10 @@ class MT5Broker(Broker):
                 w.writerow(FILL_FIELDS)
             w.writerow(row)
 
-    def open(self, direction: int, units: int, stop: float | None, take: float | None) -> None:
+    def open(self, direction: int, units: float, stop: float | None, take: float | None) -> None:
         lots = self.to_lots(units)
         if lots <= 0:
-            self.log(f"見送り: 計算した数量 {units} 通貨が最小ロット未満です")
+            self.log(f"見送り: 計算した数量 {units:,.10g}{unit_label(self.symbol)} が最小ロット未満です")
             return
         tick = self.mt5.symbol_info_tick(self.symbol)
         price = tick.ask if direction > 0 else tick.bid
@@ -273,7 +273,7 @@ def live_trades(mt5: Any, symbol: str, since: datetime, magic: int = MAGIC) -> l
         contract = mt5.symbol_info(symbol).trade_contract_size
         trades.append(Trade(
             direction=1 if first.type == mt5.ORDER_TYPE_BUY else -1,
-            units=int(round(first.volume * contract)),
+            units=tidy(first.volume * contract),
             entry_time=server_time(first), entry_price=first.price,
             exit_time=server_time(last), exit_price=last.price,
             pnl=sum(d.profit for d in outs), reason=reasons.get(last.reason, "signal"),
@@ -555,7 +555,7 @@ def _loop(mt5: Any, symbol: str, timeframe: str, strategy: Strategy, risk: RiskC
                 retries = 0
                 last_seen = bars[-1].time
                 after = broker.position()
-                state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,}通貨"
+                state = "ノーポジ" if after is None else f"{'買い' if after.direction > 0 else '売り'} {after.units:,.10g}{unit_label(symbol)}"
                 log(f"{last_seen} 確定 終値 {bars[-1].close}  → {state}" + ("" if before == after else " (変更)")
                     + ("  ※損失上限で停止中" if paused else ""))
             alive()
